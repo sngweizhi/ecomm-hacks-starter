@@ -29,6 +29,23 @@ import { api } from "../../../convex/_generated/api"
 type PriceFilter = "all" | "free" | "under25" | "25to50" | "50to100" | "100plus"
 type SortOption = "newest" | "price_low" | "price_high"
 
+// Price filter options
+const priceFilters: { value: PriceFilter; label: string }[] = [
+  { value: "all", label: "All Prices" },
+  { value: "free", label: "Free" },
+  { value: "under25", label: "Under $25" },
+  { value: "25to50", label: "$25-$50" },
+  { value: "50to100", label: "$50-$100" },
+  { value: "100plus", label: "$100+" },
+]
+
+// Sort options
+const sortOptions: { value: SortOption; label: string }[] = [
+  { value: "newest", label: "Newest" },
+  { value: "price_low", label: "Price: Low" },
+  { value: "price_high", label: "Price: High" },
+]
+
 export default function HomeScreen() {
   const { themed, theme } = useAppTheme()
   const router = useRouter()
@@ -131,23 +148,6 @@ export default function HomeScreen() {
     if (!categories) return [allOption]
     return [allOption, ...categories.map((c) => ({ slug: c.slug, name: c.name }))]
   }, [categories])
-
-  // Price filter options
-  const priceFilters: { value: PriceFilter; label: string }[] = [
-    { value: "all", label: "All Prices" },
-    { value: "free", label: "Free" },
-    { value: "under25", label: "Under $25" },
-    { value: "25to50", label: "$25-$50" },
-    { value: "50to100", label: "$50-$100" },
-    { value: "100plus", label: "$100+" },
-  ]
-
-  // Sort options
-  const sortOptions: { value: SortOption; label: string }[] = [
-    { value: "newest", label: "Newest" },
-    { value: "price_low", label: "Price: Low" },
-    { value: "price_high", label: "Price: High" },
-  ]
 
   // Open category sheet
   const openCategorySheet = useCallback(() => {

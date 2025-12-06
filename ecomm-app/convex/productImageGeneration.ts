@@ -367,10 +367,8 @@ export const generateProductPanelInternal = internalAction({
           },
         ],
         config: {
-          generationConfig: {
-            imageConfig: {
-              imageSize: "1K",
-            },
+          imageConfig: {
+            imageSize: "1K",
           },
         },
       })

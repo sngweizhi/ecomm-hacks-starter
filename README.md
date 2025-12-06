@@ -119,7 +119,7 @@ R/N
 ### Demo
 
 - **Live URL:** [your-app.vercel.app or similar]
-- **Demo Video:** [YouTube/Loom link if applicable]
+- **Demo Video:** https://youtube.com/shorts/crz0Bg6_IWM?si=ceVWdUk61rp3Sciv
 
 ### What We Built
 
@@ -193,7 +193,13 @@ pnpm run start
 
 ### Screenshots
 
-[Add 2-3 screenshots of your app in action]
+![Screenshot 1](./ecomm-app/assets/images/photo_6172477310347447241_y.jpg)
+
+![Screenshot 2](./ecomm-app/assets/images/photo_6172477310347447242_y.jpg)
+
+![Screenshot 3](./ecomm-app/assets/images/photo_6172477310347447243_y.jpg)
+
+![Screenshot 4](./ecomm-app/assets/images/photo_6172477310347447244_y.jpg)
 
 ### Challenges We Faced
 
