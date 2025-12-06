@@ -31,3 +31,4 @@ venv/
 .python-version
 
 # Excluded directories
+Zeika/
