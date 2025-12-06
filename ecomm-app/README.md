@@ -226,6 +226,132 @@ pnpm lint:check        # Check linting without fixing
 pnpm compile           # Type check TypeScript
 ```
 
+## How It Works
+
+### Voice-First Listing Creation
+
+The app uses **Gemini Live API** to enable voice and video-based product listing
+creation:
+
+1. **Video Capture**: Users record a video showing their product from multiple
+   angles
+2. **AI Analysis**: Gemini Live API analyzes the video frames and audio
+   transcript
+3. **Interactive Q&A**: The AI assistant asks clarifying questions about price
+   and condition
+4. **Image Generation**: Multiple video frames are combined into a 3x3
+   storyboard panel using `gemini-3-pro-image-preview`
+5. **Auto-Population**: Listing details (title, description, price, category)
+   are automatically extracted and populated
+
+The system uses function calling to invoke `create_product_listing` once all
+required information is gathered.
+
+### Semantic Search (RAG)
+
+The app uses **Convex RAG Component** with Gemini embeddings
+(`text-embedding-004`) for semantic product search:
+
+- Product listings are automatically embedded when created
+- Search queries are converted to embeddings
+- Vector similarity search finds products by meaning, not just keyword matching
+- Example: Searching "laptop for coding" will find "MacBook Pro", "Dell XPS",
+  etc.
+
+### AI Chat Assistant
+
+The marketplace agent uses `gemini-2.0-flash` with function calling to:
+
+- Recommend products based on user queries
+- Answer questions about listings
+- Help users find what they're looking for using natural language
+
+## Troubleshooting
+
+### Common Issues
+
+**Convex connection errors:**
+
+- Ensure `EXPO_PUBLIC_CONVEX_URL` is set correctly in `.env.local`
+- Verify Convex deployment is running: `npx convex dev`
+- Check Convex Dashboard for deployment status
+
+**Clerk authentication issues:**
+
+- Verify `EXPO_PUBLIC_CLERK_PUBLISHABLE_KEY` is set
+- Ensure Clerk JWT issuer domain is configured in Convex Dashboard
+- Check Clerk Dashboard for application status
+
+**Gemini API errors:**
+
+- Verify `GEMINI_API_KEY` is set in Convex secrets:
+  `npx convex env set GEMINI_API_KEY "your_key"`
+- Check API quota and billing in Google Cloud Console
+- Ensure the API key has access to Gemini models
+
+**Build errors:**
+
+- Clear cache: `pnpm start --clear`
+- Reset Metro bundler: `pnpm start --reset-cache`
+- Clean build folders: `rm -rf node_modules && pnpm install`
+
+**iOS build issues:**
+
+- Ensure Xcode Command Line Tools are installed
+- Run `npx expo prebuild --clean` before building
+- Check `eas.json` for correct build profiles
+
+**Android build issues:**
+
+- Ensure Android SDK is properly configured
+- Check `ANDROID_HOME` environment variable
+- Verify Gradle is properly installed
+
+## EAS Build Configuration
+
+The app uses Expo Application Services (EAS) for building. Build profiles are
+configured in `eas.json`:
+
+- **development**: Debug builds for simulator/device testing
+- **preview**: Internal distribution builds (APK for Android, IPA for iOS)
+- **production**: App store builds
+
+To build with EAS:
+
+```bash
+# Install EAS CLI
+npm install -g eas-cli
+
+# Login
+eas login
+
+# Build for iOS (simulator)
+eas build --profile development --platform ios --local
+
+# Build for Android (device)
+eas build --profile preview --platform android
+```
+
+For local builds, use the npm scripts:
+
+- `pnpm run build:ios:sim` - iOS simulator
+- `pnpm run build:ios:device` - iOS device
+- `pnpm run build:android:sim` - Android emulator
+- `pnpm run build:android:device` - Android device
+
+## External Documentation
+
+- [Convex Documentation](https://docs.convex.dev/)
+- [Clerk Documentation](https://clerk.com/docs)
+- [Google Gemini API](https://ai.google.dev/docs)
+- [Expo Documentation](https://docs.expo.dev/)
+- [React Native Documentation](https://reactnative.dev/docs/getting-started)
+
+## Screenshots
+
+_Screenshots coming soon - add your app screenshots here to showcase the UI and
+features._
+
 ## License
 
 Built for hackathon demonstration purposes.

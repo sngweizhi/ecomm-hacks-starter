@@ -366,6 +366,13 @@ export const generateProductPanelInternal = internalAction({
             ],
           },
         ],
+        config: {
+          generationConfig: {
+            imageConfig: {
+              imageSize: "1K",
+            },
+          },
+        },
       })
 
       let panelBase64: string | undefined
