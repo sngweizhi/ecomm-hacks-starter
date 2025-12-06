@@ -13,26 +13,27 @@ import {
 import { useLocalSearchParams, router } from "expo-router"
 import { useQuery } from "convex/react"
 
-import { api } from "../../../convex/_generated/api"
-import { Screen } from "@/components/Screen"
-import { Text } from "@/components/Text"
 import { Icon } from "@/components/Icon"
 import { ListingCard, ListingData } from "@/components/ListingCard"
+import { Screen } from "@/components/Screen"
+import { Text } from "@/components/Text"
 import { useAppTheme } from "@/theme/context"
 import type { ThemedStyle } from "@/theme/types"
 
+import { api } from "../../../convex/_generated/api"
+
 // Map slugs to display names (fallback)
 const CATEGORY_NAMES: Record<string, string> = {
-  electronics: "Electronics",
-  textbooks: "Textbooks",
-  furniture: "Furniture",
-  clothing: "Clothing",
+  "electronics": "Electronics",
+  "textbooks": "Textbooks",
+  "furniture": "Furniture",
+  "clothing": "Clothing",
   "dorm-essentials": "Dorm Essentials",
   "sports-outdoors": "Sports & Outdoors",
   "tickets-events": "Tickets & Events",
   "free-stuff": "Free Stuff",
-  services: "Services",
-  other: "Other",
+  "services": "Services",
+  "other": "Other",
 }
 
 type SortOption = "newest" | "oldest" | "price_low" | "price_high"
@@ -217,9 +218,7 @@ export default function CategoryFeedScreen() {
       <View style={themed($countContainer)}>
         <Text
           text={
-            processedListings.length === 1
-              ? "1 listing"
-              : `${processedListings.length} listings`
+            processedListings.length === 1 ? "1 listing" : `${processedListings.length} listings`
           }
           style={themed($countText)}
         />
@@ -465,7 +464,7 @@ const $modalTitle: ThemedStyle<TextStyle> = ({ colors, spacing }) => ({
   textAlign: "center",
 })
 
-const $modalOption: ThemedStyle<ViewStyle> = ({ colors, spacing }) => ({
+const $modalOption: ThemedStyle<ViewStyle> = ({ spacing }) => ({
   flexDirection: "row",
   alignItems: "center",
   justifyContent: "space-between",

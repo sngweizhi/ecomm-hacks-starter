@@ -14,15 +14,16 @@ import {
 import { useLocalSearchParams, router } from "expo-router"
 import { useQuery, useMutation } from "convex/react"
 
-import { api } from "../../../convex/_generated/api"
-import type { Id } from "../../../convex/_generated/dataModel"
+import { Button } from "@/components/Button"
+import { Icon } from "@/components/Icon"
 import { Screen } from "@/components/Screen"
 import { Text } from "@/components/Text"
-import { Icon } from "@/components/Icon"
-import { Button } from "@/components/Button"
-import { useAppTheme } from "@/theme/context"
 import { useAuth } from "@/context/AuthContext"
+import { useAppTheme } from "@/theme/context"
 import type { ThemedStyle } from "@/theme/types"
+
+import { api } from "../../../convex/_generated/api"
+import type { Id } from "../../../convex/_generated/dataModel"
 
 export default function ListingDetailScreen() {
   const { id } = useLocalSearchParams<{ id: string }>()
@@ -73,7 +74,7 @@ export default function ListingDetailScreen() {
         listingId: id as Id<"listings">,
       })
       router.push(`/messages/${conversationId}`)
-    } catch (error) {
+    } catch {
       Alert.alert("Error", "Failed to start conversation. Please try again.")
     } finally {
       setIsContacting(false)
@@ -356,7 +357,7 @@ const $mediaPlaceholderText: ThemedStyle<TextStyle> = ({ colors, spacing }) => (
   marginTop: spacing.sm,
 })
 
-const $soldOverlay: ThemedStyle<ViewStyle> = ({ spacing }) => ({
+const $soldOverlay: ThemedStyle<ViewStyle> = () => ({
   position: "absolute",
   top: 0,
   left: 0,
@@ -441,7 +442,7 @@ const $description: ThemedStyle<TextStyle> = ({ colors }) => ({
   lineHeight: 22,
 })
 
-const $sellerContainer: ThemedStyle<ViewStyle> = ({ spacing }) => ({
+const $sellerContainer: ThemedStyle<ViewStyle> = () => ({
   flexDirection: "row",
   alignItems: "center",
 })

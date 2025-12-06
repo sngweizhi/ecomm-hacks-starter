@@ -1,10 +1,10 @@
+import { useState } from "react"
 import { View, ViewStyle, TextStyle, Pressable, Switch } from "react-native"
 import { router } from "expo-router"
-import { useState } from "react"
 
+import { Icon } from "@/components/Icon"
 import { Screen } from "@/components/Screen"
 import { Text } from "@/components/Text"
-import { Icon } from "@/components/Icon"
 import { useAppTheme } from "@/theme/context"
 import type { ThemedStyle } from "@/theme/types"
 
@@ -33,7 +33,10 @@ export default function SettingsScreen() {
         <View style={themed($settingRow)}>
           <View style={themed($settingInfo)}>
             <Text text="Push Notifications" style={themed($settingLabel)} />
-            <Text text="Receive alerts for messages and activity" style={themed($settingDescription)} />
+            <Text
+              text="Receive alerts for messages and activity"
+              style={themed($settingDescription)}
+            />
           </View>
           <Switch
             value={notificationsEnabled}

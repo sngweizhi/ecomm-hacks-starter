@@ -1,7 +1,6 @@
-import { useEffect } from "react"
+import { useCallback } from "react"
 import { View, ViewStyle, ActivityIndicator } from "react-native"
 import { router, useFocusEffect } from "expo-router"
-import { useCallback } from "react"
 
 import { Screen } from "@/components/Screen"
 import { Text } from "@/components/Text"

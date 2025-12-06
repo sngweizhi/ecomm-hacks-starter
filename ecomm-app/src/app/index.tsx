@@ -1,7 +1,7 @@
 import { useEffect } from "react"
 import { View, ActivityIndicator, StyleSheet } from "react-native"
-import { useAuth } from "@clerk/clerk-expo"
 import { router } from "expo-router"
+import { useAuth } from "@clerk/clerk-expo"
 
 import { useAppTheme } from "@/theme/context"
 
@@ -32,8 +32,8 @@ export default function IndexScreen() {
 
 const styles = StyleSheet.create({
   container: {
+    alignItems: "center",
     flex: 1,
     justifyContent: "center",
-    alignItems: "center",
   },
 })

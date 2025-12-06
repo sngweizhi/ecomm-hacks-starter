@@ -1,4 +1,5 @@
 import { v } from "convex/values"
+
 import { query, mutation } from "./_generated/server"
 
 // Category document validator
@@ -35,10 +36,7 @@ export const listAll = query({
   args: {},
   returns: v.array(categoryDocValidator),
   handler: async (ctx) => {
-    const categories = await ctx.db
-      .query("categories")
-      .withIndex("by_displayOrder")
-      .collect()
+    const categories = await ctx.db.query("categories").withIndex("by_displayOrder").collect()
 
     return categories
   },

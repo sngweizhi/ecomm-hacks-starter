@@ -1,4 +1,12 @@
-import { View, ViewStyle, TextStyle, FlatList, Pressable, Image, ActivityIndicator } from "react-native"
+import {
+  View,
+  ViewStyle,
+  TextStyle,
+  FlatList,
+  Pressable,
+  Image,
+  ActivityIndicator,
+} from "react-native"
 import { router } from "expo-router"
 import { useQuery } from "convex/react"
 
@@ -7,6 +15,7 @@ import { Text } from "@/components/Text"
 import { useAuth } from "@/context/AuthContext"
 import { useAppTheme } from "@/theme/context"
 import type { ThemedStyle } from "@/theme/types"
+
 import { api } from "../../../convex/_generated/api"
 import type { Id } from "../../../convex/_generated/dataModel"
 
@@ -49,13 +58,16 @@ export default function MessagesScreen() {
     if (minutes < 60) return `${minutes}m ago`
     if (hours < 24) return `${hours}h ago`
     if (days < 7) return `${days}d ago`
-    
+
     return new Date(timestamp).toLocaleDateString()
   }
 
   const renderConversation = ({ item }: { item: ConversationWithMetadata }) => (
     <Pressable
-      style={({ pressed }) => [themed($conversationCard), pressed && themed($conversationCardPressed)]}
+      style={({ pressed }) => [
+        themed($conversationCard),
+        pressed && themed($conversationCardPressed),
+      ]}
       onPress={() => handleConversationPress(item._id)}
     >
       <View style={themed($avatar)}>

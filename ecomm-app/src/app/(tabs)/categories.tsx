@@ -2,25 +2,26 @@ import { View, ViewStyle, TextStyle, FlatList, Pressable, ActivityIndicator } fr
 import { router } from "expo-router"
 import { useQuery } from "convex/react"
 
-import { api } from "../../../convex/_generated/api"
+import { Icon, IconTypes } from "@/components/Icon"
 import { Screen } from "@/components/Screen"
 import { Text } from "@/components/Text"
-import { Icon, IconTypes } from "@/components/Icon"
 import { useAppTheme } from "@/theme/context"
 import type { ThemedStyle } from "@/theme/types"
 
+import { api } from "../../../convex/_generated/api"
+
 // Icon mapping for categories (using Phosphor icons)
 const CATEGORY_ICONS: Record<string, IconTypes> = {
-  electronics: "desktop",
-  textbooks: "book",
-  furniture: "couch",
-  clothing: "tShirt",
+  "electronics": "desktop",
+  "textbooks": "book",
+  "furniture": "couch",
+  "clothing": "tShirt",
   "dorm-essentials": "bed",
   "sports-outdoors": "basketball",
   "tickets-events": "ticket",
   "free-stuff": "gift",
-  services: "wrench",
-  other: "dotsThreeCircle",
+  "services": "wrench",
+  "other": "dotsThreeCircle",
 }
 
 type Category = {
@@ -119,10 +120,7 @@ function CategoryListingCount({ category }: { category: string }) {
   }
 
   return (
-    <Text
-      text={count === 1 ? "1 listing" : `${count} listings`}
-      style={themed($categoryCount)}
-    />
+    <Text text={count === 1 ? "1 listing" : `${count} listings`} style={themed($categoryCount)} />
   )
 }
 

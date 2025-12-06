@@ -2,13 +2,14 @@ import { View, ViewStyle, TextStyle, Pressable, Image, ActivityIndicator } from 
 import { router } from "expo-router"
 import { useQuery } from "convex/react"
 
+import { Button } from "@/components/Button"
+import { Icon } from "@/components/Icon"
 import { Screen } from "@/components/Screen"
 import { Text } from "@/components/Text"
-import { Icon } from "@/components/Icon"
-import { Button } from "@/components/Button"
 import { useAuth } from "@/context/AuthContext"
 import { useAppTheme } from "@/theme/context"
 import type { ThemedStyle } from "@/theme/types"
+
 import { api } from "../../../convex/_generated/api"
 
 const MENU_ITEMS = [
@@ -21,7 +22,7 @@ const MENU_ITEMS = [
 export default function MeScreen() {
   const { themed, theme } = useAppTheme()
   const { userName, userEmail, userImageUrl, logout, isAuthenticated } = useAuth()
-  
+
   // Fetch user stats from Convex
   const userStats = useQuery(api.listings.getUserStats, isAuthenticated ? {} : "skip")
 

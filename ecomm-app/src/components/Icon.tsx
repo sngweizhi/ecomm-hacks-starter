@@ -1,4 +1,4 @@
-import React from "react"
+import { ComponentType } from "react"
 import {
   StyleProp,
   TouchableOpacity,
@@ -28,6 +28,7 @@ import {
   Lock,
   MagnifyingGlass,
   Plus,
+  Robot,
   ShareNetwork,
   SquaresFour,
   User,
@@ -43,7 +44,7 @@ import {
   Package,
   Heart,
   Bug,
-  type Icon as PhosphorIconType,
+  type Icon as _PhosphorIconType,
 } from "phosphor-react-native"
 
 import { useAppTheme } from "@/theme/context"
@@ -105,6 +106,7 @@ export const iconRegistry = {
   heart: Heart,
   bug: Bug,
   ladybug: Bug, // Legacy support
+  robot: Robot, // AI Assistant
 
   // Legacy support - map old names to new icons
   search: MagnifyingGlass,
@@ -161,7 +163,7 @@ export function PressableIcon(props: PressableIconProps) {
 
   const { theme } = useAppTheme()
 
-  const IconComponent = iconRegistry[icon] as React.ComponentType<{
+  const IconComponent = iconRegistry[icon] as ComponentType<{
     size?: number
     color?: string
     weight?: "thin" | "light" | "regular" | "bold" | "fill" | "duotone"
@@ -199,7 +201,7 @@ export function Icon(props: IconProps) {
 
   const { theme } = useAppTheme()
 
-  const IconComponent = iconRegistry[icon] as React.ComponentType<{
+  const IconComponent = iconRegistry[icon] as ComponentType<{
     size?: number
     color?: string
     weight?: "thin" | "light" | "regular" | "bold" | "fill" | "duotone"

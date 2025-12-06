@@ -1,14 +1,24 @@
-import { View, ViewStyle, TextStyle, Pressable, FlatList, Image, ActivityIndicator, Alert } from "react-native"
-import { router } from "expo-router"
 import { useState } from "react"
+import {
+  View,
+  ViewStyle,
+  TextStyle,
+  Pressable,
+  FlatList,
+  Image,
+  ActivityIndicator,
+  Alert,
+} from "react-native"
+import { router } from "expo-router"
 import { useQuery, useMutation } from "convex/react"
 
+import { Icon } from "@/components/Icon"
 import { Screen } from "@/components/Screen"
 import { Text } from "@/components/Text"
-import { Icon } from "@/components/Icon"
 import { useAuth } from "@/context/AuthContext"
 import { useAppTheme } from "@/theme/context"
 import type { ThemedStyle } from "@/theme/types"
+
 import { api } from "../../../convex/_generated/api"
 import type { Doc, Id } from "../../../convex/_generated/dataModel"
 
@@ -24,7 +34,7 @@ export default function MyListingsScreen() {
   const statusFilter = activeTab === "all" ? undefined : activeTab
   const listings = useQuery(
     api.listings.listForUser,
-    isAuthenticated ? { status: statusFilter } : "skip"
+    isAuthenticated ? { status: statusFilter } : "skip",
   )
 
   // Mutations
@@ -40,46 +50,42 @@ export default function MyListingsScreen() {
   }
 
   const handleEditListing = (listing: Doc<"listings">) => {
-    Alert.alert(
-      "Manage Listing",
-      `What would you like to do with "${listing.title}"?`,
-      [
-        { text: "Cancel", style: "cancel" },
-        {
-          text: "View",
-          onPress: () => router.push(`/listing/${listing._id}`),
-        },
-        ...(listing.status === "active"
-          ? [
-              {
-                text: "Mark as Sold",
-                onPress: async () => {
-                  try {
-                    await markSold({ id: listing._id })
-                  } catch (error) {
-                    Alert.alert("Error", "Failed to mark listing as sold")
-                  }
-                },
+    Alert.alert("Manage Listing", `What would you like to do with "${listing.title}"?`, [
+      { text: "Cancel", style: "cancel" },
+      {
+        text: "View",
+        onPress: () => router.push(`/listing/${listing._id}`),
+      },
+      ...(listing.status === "active"
+        ? [
+            {
+              text: "Mark as Sold",
+              onPress: async () => {
+                try {
+                  await markSold({ id: listing._id })
+                } catch {
+                  Alert.alert("Error", "Failed to mark listing as sold")
+                }
               },
-            ]
-          : []),
-        ...(listing.status !== "archived"
-          ? [
-              {
-                text: "Delete",
-                style: "destructive" as const,
-                onPress: async () => {
-                  try {
-                    await archiveListing({ id: listing._id })
-                  } catch (error) {
-                    Alert.alert("Error", "Failed to delete listing")
-                  }
-                },
+            },
+          ]
+        : []),
+      ...(listing.status !== "archived"
+        ? [
+            {
+              text: "Delete",
+              style: "destructive" as const,
+              onPress: async () => {
+                try {
+                  await archiveListing({ id: listing._id })
+                } catch {
+                  Alert.alert("Error", "Failed to delete listing")
+                }
               },
-            ]
-          : []),
-      ]
-    )
+            },
+          ]
+        : []),
+    ])
   }
 
   const renderListing = ({ item }: { item: Doc<"listings"> }) => (
@@ -101,16 +107,16 @@ export default function MyListingsScreen() {
         <Text text={`$${item.price.toFixed(2)}`} style={themed($listingPrice)} />
         <View style={themed($listingMeta)}>
           <View style={[themed($statusBadge), themed($statusBadgeStyles[item.status])]}>
-            <Text text={item.status.charAt(0).toUpperCase() + item.status.slice(1)} style={themed($statusText)} />
+            <Text
+              text={item.status.charAt(0).toUpperCase() + item.status.slice(1)}
+              style={themed($statusText)}
+            />
           </View>
           <Text text={`${item.viewCount ?? 0} views`} style={themed($viewsText)} />
         </View>
       </View>
 
-      <Pressable 
-        style={themed($editButton)}
-        onPress={() => handleEditListing(item)}
-      >
+      <Pressable style={themed($editButton)} onPress={() => handleEditListing(item)}>
         <Icon icon="more" size={20} color={theme.colors.textDim} />
       </Pressable>
     </Pressable>

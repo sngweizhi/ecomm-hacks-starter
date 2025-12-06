@@ -1,14 +1,13 @@
+import { View, Pressable, StyleSheet } from "react-native"
 import { Tabs, router } from "expo-router"
-import { View, ViewStyle, Pressable, StyleSheet } from "react-native"
 import { useSafeAreaInsets } from "react-native-safe-area-context"
 
-import { Icon, IconTypes } from "@/components/Icon"
-import { Text } from "@/components/Text"
+import { Icon } from "@/components/Icon"
 import { useAppTheme } from "@/theme/context"
 
 // Custom sell button component (the big red plus)
 // Now navigates to the dedicated sell flow instead of tab content
-function SellButton({ onPress }: { onPress: () => void }) {
+function SellButton({ onPress: _onPress }: { onPress: () => void }) {
   const { theme } = useAppTheme()
 
   const handlePress = () => {
@@ -98,27 +97,29 @@ export default function TabLayout() {
   )
 }
 
+/* eslint-disable react-native/no-color-literals */
 const styles = StyleSheet.create({
-  sellButtonContainer: {
-    flex: 1,
-    alignItems: "center",
-    justifyContent: "flex-start",
-    marginTop: -20,
-  },
   sellButton: {
-    width: 56,
-    height: 56,
-    borderRadius: 28,
-    justifyContent: "center",
     alignItems: "center",
+    borderRadius: 28,
+    elevation: 8,
+    height: 56,
+    justifyContent: "center",
     shadowColor: "#000",
     shadowOffset: { width: 0, height: 4 },
     shadowOpacity: 0.3,
     shadowRadius: 8,
-    elevation: 8,
+    width: 56,
+  },
+  sellButtonContainer: {
+    alignItems: "center",
+    flex: 1,
+    justifyContent: "flex-start",
+    marginTop: -20,
   },
   sellButtonPressed: {
     opacity: 0.9,
     transform: [{ scale: 0.95 }],
   },
 })
+/* eslint-enable react-native/no-color-literals */

@@ -1,5 +1,5 @@
-import type { QueryCtx, MutationCtx, ActionCtx } from "../_generated/server"
 import type { Id } from "../_generated/dataModel"
+import type { QueryCtx, MutationCtx, ActionCtx } from "../_generated/server"
 
 /**
  * Get authenticated user or throw an error

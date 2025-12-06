@@ -7,43 +7,40 @@ import {
   Pressable,
   ActivityIndicator,
   Alert,
+  Image,
+  ImageStyle,
 } from "react-native"
 import { router, useLocalSearchParams } from "expo-router"
 import { useMutation, useQuery } from "convex/react"
 
 import { api } from "@/../convex/_generated/api"
+import type { Id } from "@/../convex/_generated/dataModel"
+
+import { Button } from "@/components/Button"
+import { Header } from "@/components/Header"
 import { Screen } from "@/components/Screen"
 import { Text } from "@/components/Text"
-import { Header } from "@/components/Header"
-import { Button } from "@/components/Button"
 import { TextField } from "@/components/TextField"
-import { useAppTheme } from "@/theme/context"
 import { useAuth } from "@/context/AuthContext"
+import { useAppTheme } from "@/theme/context"
 import type { ThemedStyle } from "@/theme/types"
-
-type Category = {
-  _id: string
-  name: string
-  slug: string
-}
+import { showSuccessToast, showErrorToast } from "@/utils/toast"
 
 /**
  * Sell Flow - Review Screen
  *
- * After capturing/selecting a video, users land here to:
- * 1. Preview the video thumbnail
- * 2. Edit auto-generated (or placeholder) metadata
- * 3. Set price and category
- * 4. Publish the listing
+ * This screen handles both:
+ * 1. AI-generated listings (loaded by listingId from Gemini flow)
+ * 2. Video-based listings (legacy flow with videoUri)
  *
- * The AI integration hook is stubbed - in production, this would call
- * an AI service to analyze the video and pre-fill the fields.
+ * Users can edit the auto-generated metadata and publish when ready.
  */
 export default function SellReviewScreen() {
   const { themed, theme } = useAppTheme()
-  const { isAuthenticated, userId } = useAuth()
+  const { isAuthenticated } = useAuth()
   const params = useLocalSearchParams<{
-    videoUri: string
+    listingId?: string
+    videoUri?: string
     thumbnailUri?: string
     source: string
     duration?: string
@@ -56,31 +53,45 @@ export default function SellReviewScreen() {
   const [price, setPrice] = useState("")
   const [selectedCategory, setSelectedCategory] = useState<string>("other")
   const [isSubmitting, setIsSubmitting] = useState(false)
-  const [isGeneratingMetadata, setIsGeneratingMetadata] = useState(false)
+  const [isInitialized, setIsInitialized] = useState(false)
+
+  // If we have a listingId, load the existing listing
+  const existingListing = useQuery(
+    api.listings.getById,
+    params.listingId ? { id: params.listingId as Id<"listings"> } : "skip",
+  )
 
   // Queries and mutations
   const categories = useQuery(api.categories.list) ?? []
   const createFromDraft = useMutation(api.listings.createFromDraft)
+  const updateListing = useMutation(api.listings.update)
   const publish = useMutation(api.listings.publish)
 
-  // Simulate AI metadata generation on mount
+  // Initialize form with existing listing data or generate placeholder
   useEffect(() => {
-    generateAIMetadata()
-  }, [])
+    if (isInitialized) return
+
+    if (params.listingId && existingListing) {
+      // Load from existing listing (AI-generated)
+      setTitle(existingListing.title || "")
+      setDescription(existingListing.description || "")
+      setPrice(existingListing.price?.toString() || "")
+      setSelectedCategory(existingListing.category || "other")
+      setIsInitialized(true)
+    } else if (!params.listingId && params.source) {
+      // Legacy flow - generate placeholder metadata
+      generatePlaceholderMetadata()
+      setIsInitialized(true)
+    }
+  }, [existingListing, params.listingId, params.source, isInitialized])
 
   /**
-   * Stubbed AI metadata generation
-   * In production, this would call listings.generateMetadataFromVideo
-   * to analyze the video and return suggested title, description, price, and category
+   * Generate placeholder metadata for legacy video flow
    */
-  const generateAIMetadata = async () => {
-    setIsGeneratingMetadata(true)
-
+  const generatePlaceholderMetadata = async () => {
     // Simulate AI processing delay
-    await new Promise((resolve) => setTimeout(resolve, 1500))
+    await new Promise((resolve) => setTimeout(resolve, 500))
 
-    // Generate placeholder metadata
-    // In production, this would come from AI analysis
     const placeholderData = {
       title: params.detectedLabel ? `Selling ${params.detectedLabel}` : "Item for Sale",
       description:
@@ -93,7 +104,6 @@ export default function SellReviewScreen() {
     setDescription(placeholderData.description)
     setPrice(placeholderData.suggestedPrice)
     setSelectedCategory(placeholderData.suggestedCategory)
-    setIsGeneratingMetadata(false)
   }
 
   const handleRetakeVideo = () => {
@@ -112,25 +122,34 @@ export default function SellReviewScreen() {
     try {
       setIsSubmitting(true)
 
-      const listingId = await createFromDraft({
-        videoUrl: params.videoUri,
-        thumbnailUrl: params.thumbnailUri,
-        title: title || undefined,
-        description: description || undefined,
-        price: price ? parseFloat(price) : undefined,
-        category: selectedCategory,
-        processingStatus: "completed",
-      })
+      if (params.listingId) {
+        // Update existing listing
+        await updateListing({
+          id: params.listingId as Id<"listings">,
+          title: title || undefined,
+          description: description || undefined,
+          price: price ? parseFloat(price) : undefined,
+          category: selectedCategory,
+        })
+        showSuccessToast("Draft Updated", "Your changes have been saved.")
+      } else {
+        // Create new draft
+        await createFromDraft({
+          videoUrl: params.videoUri,
+          thumbnailUrl: params.thumbnailUri,
+          title: title || undefined,
+          description: description || undefined,
+          price: price ? parseFloat(price) : undefined,
+          category: selectedCategory,
+          processingStatus: "completed",
+        })
+        showSuccessToast("Draft Saved", "Your listing has been saved as a draft.")
+      }
 
-      Alert.alert("Draft Saved", "Your listing has been saved as a draft.", [
-        {
-          text: "OK",
-          onPress: () => router.replace("/(tabs)/me"),
-        },
-      ])
+      router.replace("/(tabs)/me")
     } catch (error) {
       console.error("Error saving draft:", error)
-      Alert.alert("Error", "Failed to save draft. Please try again.")
+      showErrorToast("Error", "Failed to save draft. Please try again.")
     } finally {
       setIsSubmitting(false)
     }
@@ -162,19 +181,35 @@ export default function SellReviewScreen() {
     try {
       setIsSubmitting(true)
 
-      // Create the listing as a draft first
-      const listingId = await createFromDraft({
-        videoUrl: params.videoUri,
-        thumbnailUrl: params.thumbnailUri,
-        title,
-        description,
-        price: parseFloat(price),
-        category: selectedCategory,
-        processingStatus: "completed",
-      })
+      let listingId: Id<"listings">
 
-      // Then publish it
+      if (params.listingId) {
+        // Update existing listing and publish
+        listingId = params.listingId as Id<"listings">
+        await updateListing({
+          id: listingId,
+          title,
+          description,
+          price: parseFloat(price),
+          category: selectedCategory,
+        })
+      } else {
+        // Create new listing as draft
+        listingId = await createFromDraft({
+          videoUrl: params.videoUri,
+          thumbnailUrl: params.thumbnailUri,
+          title,
+          description,
+          price: parseFloat(price),
+          category: selectedCategory,
+          processingStatus: "completed",
+        })
+      }
+
+      // Publish the listing
       await publish({ id: listingId })
+
+      showSuccessToast("Success!", "Your listing is now live!")
 
       Alert.alert("Success! 🎉", "Your listing is now live!", [
         {
@@ -188,7 +223,7 @@ export default function SellReviewScreen() {
       ])
     } catch (error) {
       console.error("Error publishing listing:", error)
-      Alert.alert("Error", "Failed to publish listing. Please try again.")
+      showErrorToast("Error", "Failed to publish listing. Please try again.")
     } finally {
       setIsSubmitting(false)
     }
@@ -205,14 +240,30 @@ export default function SellReviewScreen() {
     ])
   }
 
+  // Show loading while fetching existing listing
+  if (params.listingId && !existingListing && !isInitialized) {
+    return (
+      <Screen preset="fixed" safeAreaEdges={["top"]} contentContainerStyle={themed($container)}>
+        <Header title="Review Listing" containerStyle={themed($header)} />
+        <View style={themed($loadingContainer)}>
+          <ActivityIndicator size="large" color={theme.colors.tint} />
+          <Text text="Loading listing..." style={themed($loadingText)} />
+        </View>
+      </Screen>
+    )
+  }
+
+  // Get image URL for preview
+  const imageUrl = existingListing?.imageUrls?.[0] || existingListing?.thumbnailUrl
+
   return (
     <Screen preset="fixed" safeAreaEdges={["top"]} contentContainerStyle={themed($container)}>
       <Header
         title="Review Listing"
         leftIcon="x"
         onLeftPress={handleClose}
-        rightText="Retake"
-        onRightPress={handleRetakeVideo}
+        rightText={params.source === "gemini-live" ? undefined : "Retake"}
+        onRightPress={params.source === "gemini-live" ? undefined : handleRetakeVideo}
         containerStyle={themed($header)}
       />
 
@@ -221,23 +272,27 @@ export default function SellReviewScreen() {
         contentContainerStyle={themed($scrollContent)}
         showsVerticalScrollIndicator={false}
       >
-        {/* Video Preview */}
-        <View style={themed($videoPreviewContainer)}>
-          <View style={themed($videoPreview)}>
-            <Text text="📹" style={themed($videoIcon)} />
-            <Text text="Video Preview" style={themed($videoPreviewText)} />
-            <Text
-              text={params.source === "camera" ? "Recorded video" : "Selected from gallery"}
-              style={themed($videoSourceText)}
-            />
-          </View>
+        {/* Image Preview */}
+        <View style={themed($imagePreviewContainer)}>
+          {imageUrl ? (
+            <Image source={{ uri: imageUrl }} style={themed($imagePreview)} resizeMode="cover" />
+          ) : (
+            <View style={themed($imagePlaceholder)}>
+              <Text text="📸" style={themed($imageIcon)} />
+              <Text text="Image Preview" style={themed($imagePreviewText)} />
+              <Text
+                text={params.source === "gemini-live" ? "AI-generated photo" : "From camera"}
+                style={themed($imageSourceText)}
+              />
+            </View>
+          )}
         </View>
 
-        {/* AI Generation Status */}
-        {isGeneratingMetadata && (
-          <View style={themed($aiStatusContainer)}>
-            <ActivityIndicator size="small" color={theme.colors.tint} />
-            <Text text="✨ Analyzing video..." style={themed($aiStatusText)} />
+        {/* AI Badge for Gemini-generated listings */}
+        {params.source === "gemini-live" && (
+          <View style={themed($aiBadgeContainer)}>
+            <Text text="✨ AI-generated listing" style={themed($aiBadgeText)} />
+            <Text text="Review and edit before publishing" style={themed($aiBadgeSubtext)} />
           </View>
         )}
 
@@ -267,7 +322,6 @@ export default function SellReviewScreen() {
             placeholder="0.00"
             value={price}
             onChangeText={(text) => {
-              // Only allow numbers and decimals
               const cleaned = text.replace(/[^0-9.]/g, "")
               setPrice(cleaned)
             }}
@@ -324,7 +378,7 @@ export default function SellReviewScreen() {
           text={isSubmitting ? "Publishing..." : "Publish Listing"}
           preset="reversed"
           onPress={handlePublish}
-          disabled={isSubmitting || isGeneratingMetadata}
+          disabled={isSubmitting}
           style={themed($publishButton)}
         />
       </View>
@@ -339,6 +393,18 @@ const $container: ThemedStyle<ViewStyle> = ({ colors }) => ({
 
 const $header: ThemedStyle<ViewStyle> = () => ({})
 
+const $loadingContainer: ThemedStyle<ViewStyle> = ({ spacing }) => ({
+  flex: 1,
+  justifyContent: "center",
+  alignItems: "center",
+  gap: spacing.md,
+})
+
+const $loadingText: ThemedStyle<TextStyle> = ({ colors }) => ({
+  color: colors.textDim,
+  fontSize: 16,
+})
+
 const $scrollView: ThemedStyle<ViewStyle> = () => ({
   flex: 1,
 })
@@ -347,12 +413,18 @@ const $scrollContent: ThemedStyle<ViewStyle> = ({ spacing }) => ({
   paddingBottom: spacing.xl,
 })
 
-const $videoPreviewContainer: ThemedStyle<ViewStyle> = ({ spacing }) => ({
+const $imagePreviewContainer: ThemedStyle<ViewStyle> = ({ spacing }) => ({
   paddingHorizontal: spacing.md,
   paddingTop: spacing.sm,
 })
 
-const $videoPreview: ThemedStyle<ViewStyle> = ({ colors, spacing }) => ({
+const $imagePreview: ThemedStyle<ImageStyle> = ({ colors }) => ({
+  height: 250,
+  borderRadius: 12,
+  backgroundColor: colors.palette.neutral800,
+})
+
+const $imagePlaceholder: ThemedStyle<ViewStyle> = ({ colors, spacing }) => ({
   height: 200,
   backgroundColor: colors.palette.neutral800,
   borderRadius: 12,
@@ -361,36 +433,42 @@ const $videoPreview: ThemedStyle<ViewStyle> = ({ colors, spacing }) => ({
   gap: spacing.sm,
 })
 
-const $videoIcon: ThemedStyle<TextStyle> = () => ({
+const $imageIcon: ThemedStyle<TextStyle> = () => ({
   fontSize: 48,
 })
 
-const $videoPreviewText: ThemedStyle<TextStyle> = ({ colors }) => ({
+const $imagePreviewText: ThemedStyle<TextStyle> = ({ colors }) => ({
   color: colors.palette.neutral300,
   fontSize: 16,
   fontWeight: "600",
 })
 
-const $videoSourceText: ThemedStyle<TextStyle> = ({ colors }) => ({
+const $imageSourceText: ThemedStyle<TextStyle> = ({ colors }) => ({
   color: colors.palette.neutral500,
   fontSize: 13,
 })
 
-const $aiStatusContainer: ThemedStyle<ViewStyle> = ({ colors, spacing }) => ({
-  flexDirection: "row",
+const $aiBadgeContainer: ThemedStyle<ViewStyle> = ({ colors, spacing }) => ({
+  flexDirection: "column",
   alignItems: "center",
   justifyContent: "center",
-  gap: spacing.sm,
+  gap: spacing.xs,
   paddingVertical: spacing.md,
   marginHorizontal: spacing.md,
   marginTop: spacing.sm,
-  backgroundColor: colors.palette.neutral200,
+  backgroundColor: colors.palette.primary100,
   borderRadius: 8,
 })
 
-const $aiStatusText: ThemedStyle<TextStyle> = ({ colors }) => ({
-  color: colors.text,
+const $aiBadgeText: ThemedStyle<TextStyle> = ({ colors }) => ({
+  color: colors.tint,
   fontSize: 14,
+  fontWeight: "600",
+})
+
+const $aiBadgeSubtext: ThemedStyle<TextStyle> = ({ colors }) => ({
+  color: colors.textDim,
+  fontSize: 12,
 })
 
 const $formContainer: ThemedStyle<ViewStyle> = ({ spacing }) => ({

@@ -1,13 +1,22 @@
-import { View, ViewStyle, TextStyle, Pressable, FlatList, ActivityIndicator, Image } from "react-native"
+import {
+  View,
+  ViewStyle,
+  TextStyle,
+  Pressable,
+  FlatList,
+  ActivityIndicator,
+  Image,
+} from "react-native"
 import { router } from "expo-router"
 import { useQuery } from "convex/react"
 
+import { Icon } from "@/components/Icon"
 import { Screen } from "@/components/Screen"
 import { Text } from "@/components/Text"
-import { Icon } from "@/components/Icon"
 import { useAuth } from "@/context/AuthContext"
 import { useAppTheme } from "@/theme/context"
 import type { ThemedStyle } from "@/theme/types"
+
 import { api } from "../../../convex/_generated/api"
 import type { Doc, Id } from "../../../convex/_generated/dataModel"
 
@@ -43,9 +52,7 @@ export default function FavoritesScreen() {
       <View style={themed($listingInfo)}>
         <Text text={item.title} style={themed($listingTitle)} numberOfLines={1} />
         <Text text={`$${item.price.toFixed(2)}`} style={themed($listingPrice)} />
-        {item.campus && (
-          <Text text={item.campus} style={themed($campusText)} numberOfLines={1} />
-        )}
+        {item.campus && <Text text={item.campus} style={themed($campusText)} numberOfLines={1} />}
       </View>
 
       <Icon icon="caretRight" size={20} color={theme.colors.textDim} />
