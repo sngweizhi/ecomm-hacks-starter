@@ -1,0 +1,6 @@
+{
+	"dependencies": {
+		"react-native-vision-camera": "^4.7.3",
+		"react-native-worklets-core": "^1.6.2"
+	}
+}
