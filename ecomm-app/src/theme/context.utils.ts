@@ -1,7 +1,7 @@
 import { Appearance } from "react-native"
 
-import type { Theme } from "./types"
 import { lightTheme, darkTheme } from "./theme"
+import type { Theme } from "./types"
 
 const systemui = require("expo-system-ui")
 

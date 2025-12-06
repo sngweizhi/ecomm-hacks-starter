@@ -1,8 +1,9 @@
 import { Image, ImageStyle, Pressable, View, ViewStyle, TextStyle } from "react-native"
 
-import { Text } from "./Text"
 import { useAppTheme } from "@/theme/context"
 import type { ThemedStyle } from "@/theme/types"
+
+import { Text } from "./Text"
 import type { Id } from "../../convex/_generated/dataModel"
 
 export interface ListingData {
@@ -31,7 +32,7 @@ interface ListingCardProps {
  * Used in the home feed waterfall grid
  */
 export function ListingCard({ listing, onPress, variant = "default" }: ListingCardProps) {
-  const { themed, theme } = useAppTheme()
+  const { themed } = useAppTheme()
 
   // Get the image URL from thumbnailUrl or first imageUrl
   const imageUrl = listing.thumbnailUrl || listing.imageUrls?.[0]

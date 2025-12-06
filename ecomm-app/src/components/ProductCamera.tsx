@@ -1,12 +1,24 @@
-import { useEffect, useMemo, useRef, useState } from "react"
-import { ActivityIndicator, Pressable, StyleSheet, View } from "react-native"
-import { Camera, useCameraDevice, useCameraPermission, useMicrophonePermission } from "react-native-vision-camera"
-import * as FileSystem from "expo-file-system"
-import { Audio } from "expo-av"
+import { useCallback, useEffect, useMemo, useRef, useState } from "react"
+import { ActivityIndicator, StyleSheet, View } from "react-native"
+import * as FileSystem from "expo-file-system/legacy"
+import {
+  Camera,
+  useCameraDevice,
+  useCameraPermission,
+  useMicrophonePermission,
+} from "react-native-vision-camera"
 
-import { BoundingBoxOverlay } from "@/components/BoundingBoxOverlay"
+import type { Id } from "../../convex/_generated/dataModel"
 import { Text } from "@/components/Text"
-import { useGeminiLiveDetection } from "@/hooks/useGeminiLiveDetection"
+import { useGeminiLive } from "@/hooks/useGeminiLive"
+import { usePcmAudioStream } from "@/hooks/usePcmAudioStream"
+import { showErrorToast } from "@/utils/toast"
+
+type ListingCreatedResult = {
+  listingId: Id<"listings">
+  title: string
+  imageUrl?: string
+}
 
 type ProductCameraProps = {
   /**
@@ -14,19 +26,25 @@ type ProductCameraProps = {
    */
   apiKey: string
   /**
-   * Optional callback with latest detection payload.
+   * Callback when a listing is created - receives listing ID and title
    */
-  onDetection?: (label?: string) => void
+  onListingCreated?: (result: ListingCreatedResult) => void
+  /**
+   * Callback for text messages from Gemini (for displaying conversation)
+   */
+  onTextMessage?: (text: string) => void
 }
 
 /**
- * Camera preview that periodically captures frames and streams them to the Gemini Live API
- * for bounding-box detection. Audio hints can be captured separately (not implemented here).
+ * Camera preview that streams video and audio to Gemini Live API.
+ * Gemini understands when users want to sell items and automatically
+ * creates listings via function calling.
  */
-export function ProductCamera({ apiKey, onDetection }: ProductCameraProps) {
+export function ProductCamera({ apiKey, onListingCreated, onTextMessage }: ProductCameraProps) {
+  console.log("[ProductCamera] Render - apiKey present:", !!apiKey)
+
   const cameraRef = useRef<Camera>(null)
   const [isCapturing, setIsCapturing] = useState(false)
-  const [isRecordingAudio, setIsRecordingAudio] = useState(false)
 
   const device = useCameraDevice("back")
   const { hasPermission: hasCameraPermission, requestPermission: requestCameraPermission } =
@@ -34,10 +52,51 @@ export function ProductCamera({ apiKey, onDetection }: ProductCameraProps) {
   const { hasPermission: hasMicPermission, requestPermission: requestMicPermission } =
     useMicrophonePermission()
 
-  const { detection, status, start, sendFrameBase64, sendPcmBase64 } = useGeminiLiveDetection(
-    { apiKey },
-    { frameIntervalMs: 900 },
+  // Memoize config to prevent effect re-runs on every render
+  const geminiConfig = useMemo(() => ({ apiKey }), [apiKey])
+  const geminiOptions = useMemo(
+    () => ({
+      frameIntervalMs: 1000,
+      onListingCreated: (result: ListingCreatedResult) => {
+        console.log("[ProductCamera] Listing created:", result)
+        // Note: Immediate toast is shown in useGeminiLive when function is called
+        // Just notify parent component to navigate
+        onListingCreated?.(result)
+      },
+      onListingError: (error: string) => {
+        console.error("[ProductCamera] Listing error:", error)
+        showErrorToast("Listing Failed", error)
+      },
+      onTextMessage: (text: string) => {
+        console.log("[ProductCamera] Text from Gemini:", text)
+        onTextMessage?.(text)
+      },
+    }),
+    [onListingCreated, onTextMessage],
   )
+
+  const { status, isProcessingListing, start, sendFrameBase64, sendPcmBase64 } = useGeminiLive(
+    geminiConfig,
+    geminiOptions,
+  )
+
+  // Handle incoming PCM audio data - forward to Gemini
+  const handlePcmData = useCallback(
+    (base64Pcm: string) => {
+      sendPcmBase64(base64Pcm, 16000)
+    },
+    [sendPcmBase64],
+  )
+
+  // PCM audio streaming hook
+  const {
+    isStreaming: isRecordingAudio,
+    start: startAudioStream,
+    stop: stopAudioStream,
+  } = usePcmAudioStream({
+    onData: handlePcmData,
+    onError: (error) => console.warn("PCM audio error:", error),
+  })
 
   useEffect(() => {
     requestCameraPermission()
@@ -45,117 +104,62 @@ export function ProductCamera({ apiKey, onDetection }: ProductCameraProps) {
   }, [requestCameraPermission, requestMicPermission])
 
   useEffect(() => {
+    console.log("[ProductCamera] start effect - device:", !!device, "permission:", hasCameraPermission)
     if (!device || !hasCameraPermission) return
-    start().catch(() => null)
+    start().catch((e) => {
+      console.log("[ProductCamera] start() rejected:", e)
+    })
   }, [device, hasCameraPermission, start])
 
+  // Periodically capture frames and send to Gemini at 1 FPS.
   useEffect(() => {
-    if (detection?.label && onDetection) {
-      onDetection(detection.label)
+    console.log(
+      "[ProductCamera] Frame capture effect - status:",
+      status,
+      "audioStreaming:",
+      isRecordingAudio,
+    )
+    if (!device || !hasCameraPermission || status !== "connected" || !isRecordingAudio) {
+      return
     }
-  }, [detection?.label, onDetection])
-
-  // Periodically capture frames (lightweight snapshot) and send to Gemini.
-  useEffect(() => {
-    if (!device || !hasCameraPermission || status !== "connected") return
+    console.log("[ProductCamera] Starting frame capture interval")
     const interval = setInterval(() => {
       void captureAndSend()
-    }, 1200)
-    return () => clearInterval(interval)
-  }, [device, hasCameraPermission, status])
-
-  // Periodically capture short audio snippets and stream.
-  useEffect(() => {
-    let cancelled = false
-    const run = async () => {
-      if (!hasMicPermission || status !== "connected") return
-      while (!cancelled) {
-        await captureAudioOnce()
-        await new Promise((r) => setTimeout(r, 1400))
-      }
-    }
-    run()
+    }, 1000)
     return () => {
-      cancelled = true
+      console.log("[ProductCamera] Clearing frame capture interval")
+      clearInterval(interval)
     }
-  }, [hasMicPermission, status])
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [device, hasCameraPermission, status, isRecordingAudio])
+
+  // Start/stop PCM audio streaming based on mic permission and connection status.
+  useEffect(() => {
+    if (hasMicPermission && status === "connected") {
+      startAudioStream()
+    } else {
+      stopAudioStream()
+    }
+  }, [hasMicPermission, status, startAudioStream, stopAudioStream])
 
   const captureAndSend = async () => {
     if (!cameraRef.current || isCapturing) return
     setIsCapturing(true)
     try {
-      const photo = await cameraRef.current.takePhoto({
-        qualityPrioritization: "speed",
-        skipMetadata: true,
+      // Use takeSnapshot() instead of takePhoto() - it captures from the preview
+      // buffer which is already in JPEG format, avoiding HEIC conversion issues
+      const snapshot = await cameraRef.current.takeSnapshot({
+        quality: 70,
       })
-      const path = photo.path.startsWith("file://") ? photo.path : `file://${photo.path}`
+      const path = snapshot.path.startsWith("file://") ? snapshot.path : `file://${snapshot.path}`
       const base64 = await FileSystem.readAsStringAsync(path, {
-        encoding: FileSystem.EncodingType.Base64,
+        encoding: "base64",
       })
       sendFrameBase64(base64)
     } catch (error) {
-      // Swallow errors to avoid spamming the UI.
-      console.warn("capture error", error)
+      console.warn("[ProductCamera] capture error:", error)
     } finally {
       setIsCapturing(false)
-    }
-  }
-
-  const captureAudioOnce = async () => {
-    if (isRecordingAudio) return
-    setIsRecordingAudio(true)
-    let recording: Audio.Recording | undefined
-    try {
-      await Audio.requestPermissionsAsync()
-      await Audio.setAudioModeAsync({ allowsRecordingIOS: true, playsInSilentModeIOS: true })
-
-      recording = new Audio.Recording()
-      await recording.prepareToRecordAsync({
-        android: {
-          extension: ".m4a",
-          outputFormat: Audio.AndroidOutputFormat.MPEG_4,
-          audioEncoder: Audio.AndroidAudioEncoder.AAC,
-          sampleRate: 44100,
-          numberOfChannels: 1,
-          bitRate: 128000,
-        },
-        ios: {
-          extension: ".m4a",
-          outputFormat: Audio.IOSOutputFormat.MPEG4AAC,
-          audioQuality: Audio.IOSAudioQuality.LOW,
-          sampleRate: 44100,
-          numberOfChannels: 1,
-          bitRate: 64000,
-        },
-        web: {},
-      })
-
-      await recording.startAsync()
-      await new Promise((r) => setTimeout(r, 900))
-      await recording.stopAndUnloadAsync()
-
-      const uri = recording.getURI()
-      if (uri) {
-        const base64 = await FileSystem.readAsStringAsync(uri, {
-          encoding: FileSystem.EncodingType.Base64,
-        })
-        // Send as AAC (m4a). Gemini supports audio blobs with proper mime type.
-        sendPcmBase64(base64, 44100, "audio/mp4")
-      }
-    } catch (error) {
-      console.warn("audio capture error", error)
-    } finally {
-      setIsRecordingAudio(false)
-      if (recording) {
-        try {
-          const uri = recording.getURI()
-          if (uri) {
-            await FileSystem.deleteAsync(uri, { idempotent: true })
-          }
-        } catch {
-          // ignore
-        }
-      }
     }
   }
 
@@ -174,22 +178,34 @@ export function ProductCamera({ apiKey, onDetection }: ProductCameraProps) {
 
   return (
     <View style={styles.container}>
-      <Camera
-        ref={cameraRef}
-        style={StyleSheet.absoluteFill}
-        device={device}
-        isActive={!showPermissionsBlocker}
-        photo
-      />
+      {!showPermissionsBlocker ? (
+        <Camera
+          ref={cameraRef}
+          style={StyleSheet.absoluteFill}
+          device={device}
+          isActive={true}
+          photo={true}
+          video={true}
+          onError={(error) =>
+            console.log("[ProductCamera] Camera error:", error.code, error.message)
+          }
+        />
+      ) : (
+        <View style={styles.permissionPlaceholder}>
+          <Text text="Camera permission required" style={styles.permissionText} />
+        </View>
+      )}
 
       <View style={styles.overlayContainer}>
-        <BoundingBoxOverlay
-          box={detection?.boundingBox}
-          label={detection?.label}
-          confidence={detection?.confidence}
-          isActive={status === "connected"}
-        />
+        {/* Processing indicator when creating listing */}
+        {isProcessingListing && (
+          <View style={styles.processingOverlay}>
+            <ActivityIndicator size="large" color="#fff" />
+            <Text text="Creating listing..." style={styles.processingText} />
+          </View>
+        )}
 
+        {/* Status pill */}
         <View style={styles.statusPill}>
           {status === "connecting" && <ActivityIndicator size="small" color="#0EA5E9" />}
           <Text
@@ -197,7 +213,7 @@ export function ProductCamera({ apiKey, onDetection }: ProductCameraProps) {
               showPermissionsBlocker
                 ? "Allow camera + mic"
                 : status === "connected"
-                  ? "Streaming to Gemini"
+                  ? "Listening..."
                   : "Connecting..."
             }
             style={styles.statusText}
@@ -210,80 +226,97 @@ export function ProductCamera({ apiKey, onDetection }: ProductCameraProps) {
           )}
         </View>
 
-        {!showPermissionsBlocker ? (
-          <Pressable style={styles.captureButton} onPress={captureAndSend}>
-            <Text text="Send frame" style={styles.captureText} />
-          </Pressable>
-        ) : (
-          <Pressable
-            style={[styles.captureButton, styles.captureButtonDisabled]}
-            onPress={() => {
-              requestCameraPermission()
-              requestMicPermission()
-            }}
-          >
-            <Text text="Grant permissions" style={styles.captureText} />
-          </Pressable>
+        {/* Instructions */}
+        {status === "connected" && !isProcessingListing && (
+          <View style={styles.instructionsPill}>
+            <Text
+              text="Point at an item and say 'I want to sell this' to create a listing"
+              style={styles.instructionsText}
+            />
+          </View>
         )}
       </View>
     </View>
   )
 }
 
+/* eslint-disable react-native/no-color-literals */
 const styles = StyleSheet.create({
+  capturingText: {
+    color: "#a5f3fc",
+    fontSize: 12,
+  },
   container: {
-    flex: 1,
-    borderRadius: 16,
-    overflow: "hidden",
     backgroundColor: "#000",
+    borderRadius: 16,
+    flex: 1,
+    overflow: "hidden",
+  },
+  fallback: {
+    alignItems: "center",
+    backgroundColor: "#111827",
+    borderRadius: 16,
+    height: 220,
+    justifyContent: "center",
+  },
+  fallbackText: {
+    color: "#e5e7eb",
+  },
+  instructionsPill: {
+    alignSelf: "center",
+    backgroundColor: "rgba(0,0,0,0.7)",
+    borderRadius: 12,
+    marginBottom: 16,
+    marginHorizontal: 16,
+    paddingHorizontal: 16,
+    paddingVertical: 10,
+  },
+  instructionsText: {
+    color: "#fff",
+    fontSize: 13,
+    textAlign: "center",
   },
   overlayContainer: {
     ...StyleSheet.absoluteFillObject,
     justifyContent: "flex-end",
   },
+  permissionPlaceholder: {
+    ...StyleSheet.absoluteFillObject,
+    alignItems: "center",
+    backgroundColor: "#111827",
+    justifyContent: "center",
+  },
+  permissionText: {
+    color: "#e5e7eb",
+    fontSize: 16,
+  },
+  processingOverlay: {
+    ...StyleSheet.absoluteFillObject,
+    alignItems: "center",
+    backgroundColor: "rgba(0,0,0,0.7)",
+    justifyContent: "center",
+  },
+  processingText: {
+    color: "#fff",
+    fontSize: 16,
+    fontWeight: "600",
+    marginTop: 12,
+  },
   statusPill: {
+    alignItems: "center",
     alignSelf: "flex-start",
-    margin: 12,
     backgroundColor: "rgba(0,0,0,0.55)",
     borderRadius: 16,
-    paddingVertical: 6,
-    paddingHorizontal: 12,
     flexDirection: "row",
-    alignItems: "center",
     gap: 8,
+    margin: 12,
+    paddingHorizontal: 12,
+    paddingVertical: 6,
   },
   statusText: {
     color: "#fff",
     fontSize: 13,
     fontWeight: "600",
   },
-  capturingText: {
-    color: "#a5f3fc",
-    fontSize: 12,
-  },
-  captureButton: {
-    alignSelf: "center",
-    marginBottom: 16,
-    backgroundColor: "#0EA5E9",
-    paddingHorizontal: 16,
-    paddingVertical: 10,
-    borderRadius: 12,
-  },
-  captureButtonDisabled: {
-    backgroundColor: "#4b5563",
-  },
-  captureText: {
-    color: "#fff",
-    fontWeight: "700",
-  },
-  fallback: {
-    height: 220,
-    borderRadius: 16,
-    alignItems: "center",
-    justifyContent: "center",
-    backgroundColor: "#111827",
-  },
-  fallbackText: {
-    color: "#e5e7eb",
-  },
 })
+/* eslint-enable react-native/no-color-literals */

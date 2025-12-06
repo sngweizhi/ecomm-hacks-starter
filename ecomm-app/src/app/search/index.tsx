@@ -6,23 +6,26 @@ import {
   Pressable,
   FlatList,
   ActivityIndicator,
+  // eslint-disable-next-line no-restricted-imports
   TextInput,
   Dimensions,
   Modal,
   ScrollView,
+  StyleSheet,
 } from "react-native"
 import { router } from "expo-router"
 import { useQuery } from "convex/react"
 
-import { api } from "../../../convex/_generated/api"
-import { Screen } from "@/components/Screen"
-import { Text } from "@/components/Text"
 import { Icon } from "@/components/Icon"
 import { ListingCard, ListingData } from "@/components/ListingCard"
-import { useAppTheme } from "@/theme/context"
+import { Screen } from "@/components/Screen"
+import { Text } from "@/components/Text"
 import { useDebouncedValue } from "@/hooks/useDebouncedValue"
-import { load, save, remove } from "@/utils/storage"
+import { useAppTheme } from "@/theme/context"
 import type { ThemedStyle } from "@/theme/types"
+import { load, save, remove } from "@/utils/storage"
+
+import { api } from "../../../convex/_generated/api"
 
 const RECENT_SEARCHES_KEY = "recent_searches"
 const MAX_RECENT_SEARCHES = 10
@@ -75,16 +78,19 @@ export default function SearchScreen() {
     }
   }
 
-  const saveRecentSearch = (term: string) => {
-    if (!term.trim()) return
+  const saveRecentSearch = useCallback(
+    (term: string) => {
+      if (!term.trim()) return
 
-    const updated = [term, ...recentSearches.filter((s) => s !== term)].slice(
-      0,
-      MAX_RECENT_SEARCHES,
-    )
-    setRecentSearches(updated)
-    save(RECENT_SEARCHES_KEY, updated)
-  }
+      const updated = [term, ...recentSearches.filter((s) => s !== term)].slice(
+        0,
+        MAX_RECENT_SEARCHES,
+      )
+      setRecentSearches(updated)
+      save(RECENT_SEARCHES_KEY, updated)
+    },
+    [recentSearches],
+  )
 
   const clearRecentSearches = () => {
     setRecentSearches([])
@@ -117,7 +123,7 @@ export default function SearchScreen() {
   const sortedResults = useMemo(() => {
     if (!searchResults) return []
 
-    let results = [...searchResults]
+    const results = [...searchResults]
 
     switch (sortBy) {
       case "newest":
@@ -146,12 +152,15 @@ export default function SearchScreen() {
     router.back()
   }
 
-  const handleListingPress = (listingId: string) => {
-    if (searchText.trim()) {
-      saveRecentSearch(searchText.trim())
-    }
-    router.push(`/listing/${listingId}`)
-  }
+  const handleListingPress = useCallback(
+    (listingId: string) => {
+      if (searchText.trim()) {
+        saveRecentSearch(searchText.trim())
+      }
+      router.push(`/listing/${listingId}`)
+    },
+    [searchText, saveRecentSearch],
+  )
 
   const handleRecentSearchPress = (term: string) => {
     setSearchText(term)
@@ -190,7 +199,7 @@ export default function SearchScreen() {
         />
       </View>
     ),
-    [getVariant, searchText],
+    [getVariant, handleListingPress],
   )
 
   const keyExtractor = useCallback((item: ListingData) => item._id, [])
@@ -255,7 +264,7 @@ export default function SearchScreen() {
         <Text
           text={
             categoryFilter
-              ? categories?.find((c) => c.slug === categoryFilter)?.name ?? "Category"
+              ? (categories?.find((c) => c.slug === categoryFilter)?.name ?? "Category")
               : "Category"
           }
           style={[themed($filterChipText), categoryFilter && themed($filterChipTextActive)]}
@@ -433,7 +442,7 @@ export default function SearchScreen() {
         <Pressable style={themed($modalOverlay)} onPress={() => setShowCategoryModal(false)}>
           <View style={themed($modalContent)}>
             <Text text="Filter by Category" preset="subheading" style={themed($modalTitle)} />
-            <ScrollView style={{ maxHeight: 400 }}>
+            <ScrollView style={styles.modalScrollView}>
               <Pressable
                 style={[themed($modalOption), !categoryFilter && themed($modalOptionActive)]}
                 onPress={() => {
@@ -719,7 +728,7 @@ const $modalTitle: ThemedStyle<TextStyle> = ({ colors, spacing }) => ({
   textAlign: "center",
 })
 
-const $modalOption: ThemedStyle<ViewStyle> = ({ colors, spacing }) => ({
+const $modalOption: ThemedStyle<ViewStyle> = ({ spacing }) => ({
   flexDirection: "row",
   alignItems: "center",
   justifyContent: "space-between",
@@ -741,4 +750,10 @@ const $modalOptionText: ThemedStyle<TextStyle> = ({ colors }) => ({
 const $modalOptionTextActive: ThemedStyle<TextStyle> = ({ colors }) => ({
   color: colors.tint,
   fontWeight: "600",
+})
+
+const styles = StyleSheet.create({
+  modalScrollView: {
+    maxHeight: 400,
+  },
 })

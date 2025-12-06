@@ -1,13 +1,14 @@
 import { useEffect, useState } from "react"
+import { StyleSheet } from "react-native"
+import { Slot, SplashScreen } from "expo-router"
 import { ClerkProvider, useAuth as useClerkAuth } from "@clerk/clerk-expo"
 import { tokenCache } from "@clerk/clerk-expo/token-cache"
 import { useFonts } from "@expo-google-fonts/space-grotesk"
-import { Slot, SplashScreen } from "expo-router"
-import { KeyboardProvider } from "react-native-keyboard-controller"
-import { initialWindowMetrics, SafeAreaProvider } from "react-native-safe-area-context"
 import { ConvexReactClient } from "convex/react"
 import { ConvexProviderWithClerk } from "convex/react-clerk"
 import { GestureHandlerRootView } from "react-native-gesture-handler"
+import { KeyboardProvider } from "react-native-keyboard-controller"
+import { initialWindowMetrics, SafeAreaProvider } from "react-native-safe-area-context"
 
 import { AuthProvider } from "@/context/AuthContext"
 import { initI18n } from "@/i18n"
@@ -57,7 +58,7 @@ export default function RootLayout() {
   const isReady = isI18nInitialized && (areFontsLoaded || fontLoadError)
 
   return (
-    <GestureHandlerRootView style={{ flex: 1 }}>
+    <GestureHandlerRootView style={styles.root}>
       <ClerkProvider tokenCache={tokenCache} publishableKey={clerkPublishableKey}>
         <ConvexProviderWithClerk client={convex} useAuth={useClerkAuth}>
           <SafeAreaProvider initialMetrics={initialWindowMetrics}>
@@ -75,3 +76,9 @@ export default function RootLayout() {
     </GestureHandlerRootView>
   )
 }
+
+const styles = StyleSheet.create({
+  root: {
+    flex: 1,
+  },
+})

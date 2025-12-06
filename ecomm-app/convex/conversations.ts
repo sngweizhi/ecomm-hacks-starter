@@ -1,9 +1,10 @@
 import { v } from "convex/values"
+
 import { query, mutation } from "./_generated/server"
 import { getAuthenticatedUser } from "./lib/auth"
 
 // Conversation document validator
-const conversationDocValidator = v.object({
+const _conversationDocValidator = v.object({
   _id: v.id("conversations"),
   _creationTime: v.number(),
   listingId: v.id("listings"),
@@ -136,9 +137,7 @@ export const get = query({
     const unreadMessages = await ctx.db
       .query("messages")
       .withIndex("by_conversationId", (q) => q.eq("conversationId", args.id))
-      .filter((q) =>
-        q.and(q.eq(q.field("senderId"), otherUserId), q.eq(q.field("isRead"), false)),
-      )
+      .filter((q) => q.and(q.eq(q.field("senderId"), otherUserId), q.eq(q.field("isRead"), false)))
       .collect()
 
     return {
@@ -301,9 +300,7 @@ export const markAsRead = mutation({
     const unreadMessages = await ctx.db
       .query("messages")
       .withIndex("by_conversationId", (q) => q.eq("conversationId", args.conversationId))
-      .filter((q) =>
-        q.and(q.neq(q.field("senderId"), userId), q.eq(q.field("isRead"), false)),
-      )
+      .filter((q) => q.and(q.neq(q.field("senderId"), userId), q.eq(q.field("isRead"), false)))
       .collect()
 
     // Mark all as read
@@ -346,9 +343,7 @@ export const getUnreadCount = query({
       const unreadMessages = await ctx.db
         .query("messages")
         .withIndex("by_conversationId", (q) => q.eq("conversationId", convId))
-        .filter((q) =>
-          q.and(q.neq(q.field("senderId"), userId), q.eq(q.field("isRead"), false)),
-        )
+        .filter((q) => q.and(q.neq(q.field("senderId"), userId), q.eq(q.field("isRead"), false)))
         .collect()
       totalUnread += unreadMessages.length
     }

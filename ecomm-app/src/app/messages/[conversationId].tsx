@@ -1,14 +1,27 @@
-import { View, ViewStyle, TextStyle, Pressable, FlatList, TextInput, KeyboardAvoidingView, Platform, ActivityIndicator, Image } from "react-native"
-import { useLocalSearchParams, router } from "expo-router"
 import { useState, useEffect, useRef } from "react"
+import {
+  View,
+  ViewStyle,
+  TextStyle,
+  Pressable,
+  FlatList,
+  // eslint-disable-next-line no-restricted-imports
+  TextInput,
+  KeyboardAvoidingView,
+  Platform,
+  ActivityIndicator,
+  Image,
+} from "react-native"
+import { useLocalSearchParams, router } from "expo-router"
 import { useQuery, useMutation } from "convex/react"
 
+import { Icon } from "@/components/Icon"
 import { Screen } from "@/components/Screen"
 import { Text } from "@/components/Text"
-import { Icon } from "@/components/Icon"
-import { useAppTheme } from "@/theme/context"
 import { useAuth } from "@/context/AuthContext"
+import { useAppTheme } from "@/theme/context"
 import type { ThemedStyle } from "@/theme/types"
+
 import { api } from "../../../convex/_generated/api"
 import type { Id, Doc } from "../../../convex/_generated/dataModel"
 
@@ -25,13 +38,13 @@ export default function ConversationScreen() {
   // Fetch conversation details
   const conversation = useQuery(
     api.conversations.get,
-    isAuthenticated && conversationId ? { id: parsedConversationId } : "skip"
+    isAuthenticated && conversationId ? { id: parsedConversationId } : "skip",
   )
 
   // Fetch messages
   const messages = useQuery(
     api.conversations.listMessages,
-    isAuthenticated && conversationId ? { conversationId: parsedConversationId } : "skip"
+    isAuthenticated && conversationId ? { conversationId: parsedConversationId } : "skip",
   )
 
   // Mutations
@@ -45,7 +58,7 @@ export default function ConversationScreen() {
         // Silently handle error
       })
     }
-  }, [conversationId, isAuthenticated])
+  }, [conversationId, isAuthenticated, markAsRead, parsedConversationId])
 
   const handleBack = () => {
     router.back()
@@ -53,7 +66,7 @@ export default function ConversationScreen() {
 
   const handleSend = async () => {
     if (!message.trim() || !conversationId) return
-    
+
     const messageContent = message.trim()
     setMessage("") // Clear immediately for better UX
 
@@ -62,7 +75,7 @@ export default function ConversationScreen() {
         conversationId: parsedConversationId,
         content: messageContent,
       })
-    } catch (error) {
+    } catch {
       // Restore message on error
       setMessage(messageContent)
     }
@@ -79,21 +92,37 @@ export default function ConversationScreen() {
     const date = new Date(timestamp)
     const now = new Date()
     const isToday = date.toDateString() === now.toDateString()
-    
+
     if (isToday) {
       return date.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })
     }
-    return date.toLocaleDateString([], { month: "short", day: "numeric" }) + " " + 
-           date.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })
+    return (
+      date.toLocaleDateString([], { month: "short", day: "numeric" }) +
+      " " +
+      date.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })
+    )
   }
 
   const renderMessage = ({ item }: { item: Doc<"messages"> }) => {
     const isMe = item.senderId === userId
 
     return (
-      <View style={[themed($messageContainer), isMe ? themed($messageContainerMe) : themed($messageContainerOther)]}>
-        <View style={[themed($messageBubble), isMe ? themed($messageBubbleMe) : themed($messageBubbleOther)]}>
-          <Text text={item.content} style={[themed($messageText), isMe && themed($messageTextMe)]} />
+      <View
+        style={[
+          themed($messageContainer),
+          isMe ? themed($messageContainerMe) : themed($messageContainerOther),
+        ]}
+      >
+        <View
+          style={[
+            themed($messageBubble),
+            isMe ? themed($messageBubbleMe) : themed($messageBubbleOther),
+          ]}
+        >
+          <Text
+            text={item.content}
+            style={[themed($messageText), isMe && themed($messageTextMe)]}
+          />
         </View>
         <Text text={formatMessageTime(item.createdAt)} style={themed($messageTime)} />
       </View>
@@ -139,7 +168,10 @@ export default function ConversationScreen() {
           </View>
         </View>
         <View style={themed($emptyContainer)}>
-          <Text text="This conversation doesn't exist or you don't have access to it." style={themed($emptySubtitle)} />
+          <Text
+            text="This conversation doesn't exist or you don't have access to it."
+            style={themed($emptySubtitle)}
+          />
         </View>
       </Screen>
     )
@@ -158,15 +190,29 @@ export default function ConversationScreen() {
         <View style={themed($headerInfo)}>
           <View style={themed($headerAvatar)}>
             {conversation.listingThumbnail ? (
-              <Image source={{ uri: conversation.listingThumbnail }} style={themed($headerAvatarImage)} />
+              <Image
+                source={{ uri: conversation.listingThumbnail }}
+                style={themed($headerAvatarImage)}
+              />
             ) : (
-              <Text text={conversation.otherUserName.charAt(0).toUpperCase()} style={themed($avatarText)} />
+              <Text
+                text={conversation.otherUserName.charAt(0).toUpperCase()}
+                style={themed($avatarText)}
+              />
             )}
           </View>
           <View style={themed($headerText)}>
-            <Text text={conversation.otherUserName} style={themed($headerTitle)} numberOfLines={1} />
+            <Text
+              text={conversation.otherUserName}
+              style={themed($headerTitle)}
+              numberOfLines={1}
+            />
             <Pressable onPress={handleViewListing}>
-              <Text text={`Re: ${conversation.listingTitle}`} style={themed($headerSubtitle)} numberOfLines={1} />
+              <Text
+                text={`Re: ${conversation.listingTitle}`}
+                style={themed($headerSubtitle)}
+                numberOfLines={1}
+              />
             </Pressable>
           </View>
         </View>
@@ -176,8 +222,8 @@ export default function ConversationScreen() {
       </View>
 
       {/* Messages list */}
-      <KeyboardAvoidingView 
-        style={themed($keyboardAvoid)} 
+      <KeyboardAvoidingView
+        style={themed($keyboardAvoid)}
         behavior={Platform.OS === "ios" ? "padding" : "height"}
         keyboardVerticalOffset={0}
       >
@@ -203,12 +249,16 @@ export default function ConversationScreen() {
             multiline
             maxLength={500}
           />
-          <Pressable 
+          <Pressable
             style={[themed($sendButton), !message.trim() && themed($sendButtonDisabled)]}
             onPress={handleSend}
             disabled={!message.trim()}
           >
-            <Icon icon="caretRight" size={20} color={message.trim() ? theme.colors.palette.neutral100 : theme.colors.textDim} />
+            <Icon
+              icon="caretRight"
+              size={20}
+              color={message.trim() ? theme.colors.palette.neutral100 : theme.colors.textDim}
+            />
           </Pressable>
         </View>
       </KeyboardAvoidingView>
@@ -240,7 +290,7 @@ const $backButton: ThemedStyle<ViewStyle> = ({ colors, spacing }) => ({
   marginRight: spacing.sm,
 })
 
-const $headerInfo: ThemedStyle<ViewStyle> = ({ spacing }) => ({
+const $headerInfo: ThemedStyle<ViewStyle> = () => ({
   flex: 1,
   flexDirection: "row",
   alignItems: "center",

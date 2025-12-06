@@ -1,16 +1,16 @@
 import { useCallback, useEffect, useState } from "react"
 import { Image, ImageStyle, Platform, TextStyle, View, ViewStyle } from "react-native"
-import * as WebBrowser from "expo-web-browser"
 import * as Linking from "expo-linking"
-import { useOAuth, useAuth } from "@clerk/clerk-expo"
 import { router } from "expo-router"
+import * as WebBrowser from "expo-web-browser"
+import { useOAuth, useAuth } from "@clerk/clerk-expo"
 
 import { Button } from "@/components/Button"
 import { Screen } from "@/components/Screen"
 import { Text } from "@/components/Text"
 import { useAppTheme } from "@/theme/context"
-import { showErrorToast } from "@/utils/toast"
 import type { ThemedStyle } from "@/theme/types"
+import { showErrorToast } from "@/utils/toast"
 
 const welcomeLogo = require("@assets/images/logo.png")
 
@@ -90,8 +90,17 @@ export default function SignInScreen() {
     >
       <View style={themed($topContainer)}>
         <Image style={themed($welcomeLogo)} source={welcomeLogo} resizeMode="contain" />
-        <Text testID="login-heading" text="Campus Market" preset="heading" style={themed($heading)} />
-        <Text text="Buy & sell with students near you" preset="subheading" style={themed($subheading)} />
+        <Text
+          testID="login-heading"
+          text="Campus Market"
+          preset="heading"
+          style={themed($heading)}
+        />
+        <Text
+          text="Buy & sell with students near you"
+          preset="subheading"
+          style={themed($subheading)}
+        />
       </View>
 
       <View style={themed($bottomContainer)}>

@@ -54,6 +54,13 @@
         }
       }
     ],
+    [
+      "react-native-vision-camera",
+      {
+        "cameraPermissionText": "$(PRODUCT_NAME) needs access to your Camera to capture product photos.",
+        "enableCodeScanner": false
+      }
+    ],
     "expo-build-properties",
     "expo-router"
   ],

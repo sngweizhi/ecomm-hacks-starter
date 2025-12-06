@@ -1,56 +1,86 @@
-import { useState } from "react"
-import {
-  View,
-  ViewStyle,
-  TextStyle,
-  Pressable,
-} from "react-native"
-import { router } from "expo-router"
+import { useCallback, useEffect, useState } from "react"
+import { View, ViewStyle, TextStyle, Pressable, ScrollView } from "react-native"
 import * as ImagePicker from "expo-image-picker"
+import { router } from "expo-router"
+import { useAction } from "convex/react"
 
+import type { Id } from "../../../convex/_generated/dataModel"
+import { Button } from "@/components/Button"
+import { Header } from "@/components/Header"
 import { ProductCamera } from "@/components/ProductCamera"
 import { Screen } from "@/components/Screen"
 import { Text } from "@/components/Text"
-import { Header } from "@/components/Header"
-import { Button } from "@/components/Button"
 import { useAppTheme } from "@/theme/context"
 import type { ThemedStyle } from "@/theme/types"
+
+import { api } from "../../../convex/_generated/api"
+
+type ListingCreatedResult = {
+  listingId: Id<"listings">
+  title: string
+  imageUrl?: string
+}
 
 /**
  * Sell Flow - Video Capture Screen
  *
- * This screen allows users to record or select a video of their item.
- * Currently uses a placeholder for the camera since expo-camera requires
- * additional native setup. The flow supports:
+ * This screen provides a camera preview that streams to Gemini Live API.
+ * When users indicate they want to sell an item (via voice), Gemini
+ * automatically creates a listing via function calling.
  *
- * 1. Recording a video (placeholder - tap to simulate)
- * 2. Choosing from gallery
- *
- * After capture, navigates to the review screen.
+ * Features:
+ * - Live camera + audio streaming to Gemini
+ * - Voice-activated listing creation
+ * - AI-generated professional product photos
+ * - Automatic navigation to review screen
  */
 export default function SellCaptureScreen() {
-  const { themed, theme } = useAppTheme()
-  const [isProcessing, setIsProcessing] = useState(false)
-  const [detectedLabel, setDetectedLabel] = useState<string | undefined>(undefined)
+  const { themed } = useAppTheme()
+  const [apiKey, setApiKey] = useState<string | undefined>(undefined)
+  const [apiKeyError, setApiKeyError] = useState<string | undefined>(undefined)
+  const [conversationText, setConversationText] = useState<string>("")
+  const getGeminiApiKey = useAction(api.gemini.getGeminiApiKey)
 
-  const apiKey = process.env.EXPO_PUBLIC_GEMINI_API_KEY
+  // Fetch API key from Convex (keeps it out of the bundle)
+  useEffect(() => {
+    getGeminiApiKey({})
+      .then(setApiKey)
+      .catch((error) => {
+        console.error("Failed to fetch Gemini API key:", error)
+        setApiKeyError(error.message || "Failed to load API key")
+      })
+  }, [getGeminiApiKey])
+
+  // Handle listing created - navigate to review screen
+  const handleListingCreated = useCallback((result: ListingCreatedResult) => {
+    console.log("[SellCapture] Listing created, navigating to review:", result.listingId)
+    router.push({
+      pathname: "/sell/review",
+      params: {
+        listingId: result.listingId,
+        source: "gemini-live",
+      },
+    })
+  }, [])
+
+  // Handle text messages from Gemini (for displaying conversation)
+  const handleTextMessage = useCallback((text: string) => {
+    setConversationText((prev) => (prev ? `${prev}\n${text}` : text))
+  }, [])
 
   const handleChooseFromGallery = async () => {
     try {
-      // Request permissions
       const { status } = await ImagePicker.requestMediaLibraryPermissionsAsync()
       if (status !== "granted") {
-        // In a real app, show a proper permission denied message
         console.log("Media library permission denied")
         return
       }
 
-      // Launch image picker for videos
       const result = await ImagePicker.launchImageLibraryAsync({
         mediaTypes: ["videos"],
         allowsEditing: true,
         quality: 1,
-        videoMaxDuration: 60, // 60 second max
+        videoMaxDuration: 60,
       })
 
       if (!result.canceled && result.assets[0]) {
@@ -59,7 +89,7 @@ export default function SellCaptureScreen() {
           pathname: "/sell/review",
           params: {
             videoUri: asset.uri,
-            thumbnailUri: asset.uri, // For videos, use the uri as placeholder thumbnail
+            thumbnailUri: asset.uri,
             source: "gallery",
             duration: String(asset.duration || 0),
           },
@@ -74,29 +104,10 @@ export default function SellCaptureScreen() {
     router.back()
   }
 
-  const handleContinue = () => {
-    if (!apiKey) {
-      console.warn("Missing EXPO_PUBLIC_GEMINI_API_KEY")
-    }
-
-    setIsProcessing(true)
-    setTimeout(() => {
-      setIsProcessing(false)
-      router.push({
-        pathname: "/sell/review",
-        params: {
-          videoUri: "placeholder://gemini-live",
-          source: "gemini-live",
-          detectedLabel,
-        },
-      })
-    }, 400)
-  }
-
   return (
     <Screen preset="fixed" safeAreaEdges={["top"]} contentContainerStyle={themed($container)}>
       <Header
-        title="Record Video"
+        title="Create Listing"
         leftIcon="x"
         onLeftPress={handleClose}
         containerStyle={themed($header)}
@@ -105,33 +116,52 @@ export default function SellCaptureScreen() {
       {/* Camera Preview Area */}
       <View style={themed($cameraContainer)}>
         {apiKey ? (
-          <ProductCamera apiKey={apiKey} onDetection={setDetectedLabel} />
-        ) : (
+          <ProductCamera
+            apiKey={apiKey}
+            onListingCreated={handleListingCreated}
+            onTextMessage={handleTextMessage}
+          />
+        ) : apiKeyError ? (
           <View style={themed($cameraPlaceholder)}>
             <Text
-              text="Add EXPO_PUBLIC_GEMINI_API_KEY to enable live detection."
+              text={`Error loading API key: ${apiKeyError}`}
               style={themed($placeholderSubtext)}
             />
+          </View>
+        ) : (
+          <View style={themed($cameraPlaceholder)}>
+            <Text text="Loading camera..." style={themed($placeholderSubtext)} />
           </View>
         )}
       </View>
 
-      {/* Tips Section */}
-      <View style={themed($tipsContainer)}>
-        <Text text="Tips for a great listing:" style={themed($tipsTitle)} />
-        <View style={themed($tipRow)}>
-          <Text text="📐" style={themed($tipEmoji)} />
-          <Text text="Show item from multiple angles" style={themed($tipText)} />
+      {/* Conversation display */}
+      {conversationText ? (
+        <ScrollView style={themed($conversationContainer)}>
+          <Text text={conversationText} style={themed($conversationText)} />
+        </ScrollView>
+      ) : (
+        /* Tips Section */
+        <View style={themed($tipsContainer)}>
+          <Text text="How to list an item:" style={themed($tipsTitle)} />
+          <View style={themed($tipRow)}>
+            <Text text="📸" style={themed($tipEmoji)} />
+            <Text text="Point camera at your item" style={themed($tipText)} />
+          </View>
+          <View style={themed($tipRow)}>
+            <Text text="🗣️" style={themed($tipEmoji)} />
+            <Text text='Say "I want to sell this for $X"' style={themed($tipText)} />
+          </View>
+          <View style={themed($tipRow)}>
+            <Text text="✨" style={themed($tipEmoji)} />
+            <Text text="AI creates a professional listing" style={themed($tipText)} />
+          </View>
+          <View style={themed($tipRow)}>
+            <Text text="✅" style={themed($tipEmoji)} />
+            <Text text="Review and publish!" style={themed($tipText)} />
+          </View>
         </View>
-        <View style={themed($tipRow)}>
-          <Text text="💡" style={themed($tipEmoji)} />
-          <Text text="Use good lighting" style={themed($tipText)} />
-        </View>
-        <View style={themed($tipRow)}>
-          <Text text="🗣️" style={themed($tipEmoji)} />
-          <Text text="Mention condition and asking price" style={themed($tipText)} />
-        </View>
-      </View>
+      )}
 
       {/* Controls */}
       <View style={themed($controlsContainer)}>
@@ -139,19 +169,13 @@ export default function SellCaptureScreen() {
         <Pressable
           style={({ pressed }) => [themed($sideButton), pressed && themed($sideButtonPressed)]}
           onPress={handleChooseFromGallery}
-          disabled={isProcessing}
         >
           <Text text="🖼️" style={themed($sideButtonIcon)} />
           <Text text="Gallery" style={themed($sideButtonLabel)} />
         </Pressable>
 
-        <Button
-          text={isProcessing ? "Preparing..." : "Continue"}
-          preset="reversed"
-          onPress={handleContinue}
-          disabled={isProcessing}
-          style={themed($continueButton)}
-        />
+        {/* Spacer */}
+        <View style={themed($spacer)} />
       </View>
     </Screen>
   )
@@ -170,7 +194,7 @@ const $cameraContainer: ThemedStyle<ViewStyle> = ({ spacing }) => ({
   paddingTop: spacing.sm,
 })
 
-const $cameraPlaceholder: ThemedStyle<ViewStyle> = ({ colors, spacing }) => ({
+const $cameraPlaceholder: ThemedStyle<ViewStyle> = ({ colors }) => ({
   flex: 1,
   backgroundColor: colors.palette.neutral800,
   borderRadius: 16,
@@ -184,6 +208,18 @@ const $placeholderSubtext: ThemedStyle<TextStyle> = ({ colors, spacing }) => ({
   fontSize: 14,
   textAlign: "center",
   paddingHorizontal: spacing.xl,
+})
+
+const $conversationContainer: ThemedStyle<ViewStyle> = ({ spacing }) => ({
+  maxHeight: 120,
+  paddingHorizontal: spacing.lg,
+  paddingVertical: spacing.sm,
+})
+
+const $conversationText: ThemedStyle<TextStyle> = ({ colors }) => ({
+  color: colors.textDim,
+  fontSize: 13,
+  fontStyle: "italic",
 })
 
 const $tipsContainer: ThemedStyle<ViewStyle> = ({ spacing }) => ({
@@ -223,7 +259,7 @@ const $controlsContainer: ThemedStyle<ViewStyle> = ({ spacing }) => ({
   paddingBottom: spacing.xl,
 })
 
-const $sideButton: ThemedStyle<ViewStyle> = ({ colors, spacing }) => ({
+const $sideButton: ThemedStyle<ViewStyle> = ({ spacing }) => ({
   alignItems: "center",
   justifyContent: "center",
   gap: spacing.xs,
@@ -244,7 +280,6 @@ const $sideButtonLabel: ThemedStyle<TextStyle> = ({ colors }) => ({
   fontSize: 12,
 })
 
-const $continueButton: ThemedStyle<ViewStyle> = ({ spacing }) => ({
+const $spacer: ThemedStyle<ViewStyle> = () => ({
   flex: 1,
-  marginHorizontal: spacing.md,
 })

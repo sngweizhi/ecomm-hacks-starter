@@ -48,6 +48,9 @@ export default defineSchema({
 
     // Search optimization
     searchText: v.optional(v.string()), // Concatenated title + description for search
+
+    // RAG embedding entry ID for semantic search
+    ragEntryId: v.optional(v.string()),
   })
     // Core indexes for efficient querying
     .index("by_ownerId", ["ownerId"])

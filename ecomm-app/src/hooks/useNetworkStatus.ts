@@ -169,7 +169,10 @@ export function useNetworkStatus(): NetworkStatus {
 /**
  * Get current network status (non-hook version for use outside React)
  */
-export async function getNetworkStatus(): Promise<{ isOnline: boolean; connectionType: NetInfoStateType }> {
+export async function getNetworkStatus(): Promise<{
+  isOnline: boolean
+  connectionType: NetInfoStateType
+}> {
   const state = await NetInfo.fetch()
   return {
     isOnline: state.isConnected === true && state.isInternetReachable !== false,

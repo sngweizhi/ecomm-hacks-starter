@@ -1,9 +1,9 @@
 import { View, ViewStyle, TextStyle, Pressable } from "react-native"
 import { router } from "expo-router"
 
+import { Icon } from "@/components/Icon"
 import { Screen } from "@/components/Screen"
 import { Text } from "@/components/Text"
-import { Icon } from "@/components/Icon"
 import { useAppTheme } from "@/theme/context"
 import type { ThemedStyle } from "@/theme/types"
 

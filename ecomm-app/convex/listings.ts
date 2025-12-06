@@ -1,6 +1,7 @@
 import { v } from "convex/values"
-import { query, mutation, action, internalMutation } from "./_generated/server"
+
 import { internal } from "./_generated/api"
+import { query, mutation, action, internalMutation } from "./_generated/server"
 import { getAuthenticatedUser, getAuthorizedListing } from "./lib/auth"
 
 // Listing status validator (matches schema)
@@ -41,6 +42,7 @@ const listingDocValidator = v.object({
   processingStatus: v.optional(processingStatusValidator),
   processingError: v.optional(v.string()),
   searchText: v.optional(v.string()),
+  ragEntryId: v.optional(v.string()),
 })
 
 /**
@@ -57,7 +59,7 @@ export const listForFeed = query({
   handler: async (ctx, args) => {
     const limit = args.limit ?? 20
 
-    let q = ctx.db
+    const q = ctx.db
       .query("listings")
       .withIndex("by_status_and_createdAt", (q) => q.eq("status", "active"))
       .order("desc")
@@ -205,6 +207,7 @@ export const create = mutation({
   handler: async (ctx, args) => {
     const { userId } = await getAuthenticatedUser(ctx)
     const now = Date.now()
+    const status = args.status ?? "active"
 
     const listingId = await ctx.db.insert("listings", {
       ownerId: userId,
@@ -217,13 +220,20 @@ export const create = mutation({
       videoUrl: args.videoUrl,
       thumbnailUrl: args.thumbnailUrl,
       imageUrls: args.imageUrls,
-      status: args.status ?? "active",
+      status,
       createdAt: now,
       updatedAt: now,
       viewCount: 0,
       favoriteCount: 0,
       searchText: `${args.title} ${args.description}`.toLowerCase(),
     })
+
+    // Schedule embedding generation for active listings
+    if (status === "active") {
+      await ctx.scheduler.runAfter(0, internal.listingEmbeddings.embedListing, {
+        listingId,
+      })
+    }
 
     return listingId
   },
@@ -323,13 +333,24 @@ export const update = mutation({
     if (args.processingError !== undefined) updates.processingError = args.processingError
 
     // Update search text if title or description changed
-    if (args.title !== undefined || args.description !== undefined) {
+    const contentChanged =
+      args.title !== undefined || args.description !== undefined || args.category !== undefined
+    if (contentChanged) {
       const newTitle = args.title ?? listing.title
       const newDesc = args.description ?? listing.description
       updates.searchText = `${newTitle} ${newDesc}`.toLowerCase()
     }
 
     await ctx.db.patch(args.id, updates)
+
+    // Re-embed if content changed and listing is active
+    const effectiveStatus = args.status ?? listing.status
+    if (contentChanged && effectiveStatus === "active") {
+      await ctx.scheduler.runAfter(0, internal.listingEmbeddings.embedListing, {
+        listingId: args.id,
+      })
+    }
+
     return null
   },
 })
@@ -341,11 +362,20 @@ export const markSold = mutation({
   args: { id: v.id("listings") },
   returns: v.null(),
   handler: async (ctx, args) => {
-    await getAuthorizedListing(ctx, args.id)
+    const listing = await getAuthorizedListing(ctx, args.id)
     await ctx.db.patch(args.id, {
       status: "sold",
       updatedAt: Date.now(),
     })
+
+    // Remove embedding when listing is no longer active
+    if (listing.ragEntryId) {
+      await ctx.scheduler.runAfter(0, internal.listingEmbeddings.removeListingEmbedding, {
+        listingId: args.id,
+        ragEntryId: listing.ragEntryId,
+      })
+    }
+
     return null
   },
 })
@@ -357,11 +387,20 @@ export const archive = mutation({
   args: { id: v.id("listings") },
   returns: v.null(),
   handler: async (ctx, args) => {
-    await getAuthorizedListing(ctx, args.id)
+    const listing = await getAuthorizedListing(ctx, args.id)
     await ctx.db.patch(args.id, {
       status: "archived",
       updatedAt: Date.now(),
     })
+
+    // Remove embedding when listing is archived
+    if (listing.ragEntryId) {
+      await ctx.scheduler.runAfter(0, internal.listingEmbeddings.removeListingEmbedding, {
+        listingId: args.id,
+        ragEntryId: listing.ragEntryId,
+      })
+    }
+
     return null
   },
 })
@@ -394,6 +433,12 @@ export const publish = mutation({
       status: "active",
       updatedAt: Date.now(),
     })
+
+    // Generate embedding for newly published listing
+    await ctx.scheduler.runAfter(0, internal.listingEmbeddings.embedListing, {
+      listingId: args.id,
+    })
+
     return null
   },
 })
@@ -482,9 +527,7 @@ export const listFavorites = query({
 
     const listings = await Promise.all(favorites.map((f) => ctx.db.get(f.listingId)))
 
-    return listings.filter(
-      (l): l is NonNullable<typeof l> => l !== null && l.status === "active",
-    )
+    return listings.filter((l): l is NonNullable<typeof l> => l !== null && l.status === "active")
   },
 })
 
@@ -670,6 +713,13 @@ export const applyGeneratedMetadata = internalMutation({
       processingStatus: "completed",
       updatedAt: Date.now(),
     })
+
+    // Re-embed if listing is active
+    if (listing.status === "active") {
+      await ctx.scheduler.runAfter(0, internal.listingEmbeddings.embedListing, {
+        listingId: args.id,
+      })
+    }
 
     return null
   },

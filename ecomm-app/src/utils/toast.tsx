@@ -1,5 +1,6 @@
-import React from "react"
-import { View, Text, StyleSheet, ViewStyle, TextStyle } from "react-native"
+import { View, StyleSheet, ViewStyle, TextStyle } from "react-native"
+// eslint-disable-next-line no-restricted-imports
+import { Text } from "react-native"
 import Toast, { ToastConfig } from "react-native-toast-message"
 
 import { getTheme } from "@/theme/context.utils"
@@ -32,9 +33,7 @@ export const toastConfig: ToastConfig = {
   success: ({ text1, text2 }) => {
     const theme = getTheme()
     return (
-      <View
-        style={[styles.container, { backgroundColor: theme.colors.palette.secondary100 }]}
-      >
+      <View style={[styles.container, { backgroundColor: theme.colors.palette.secondary100 }]}>
         <View style={[styles.indicator, { backgroundColor: theme.colors.palette.secondary500 }]} />
         <View style={styles.content}>
           {text1 && (
@@ -77,6 +76,7 @@ export const toastConfig: ToastConfig = {
   },
 }
 
+/* eslint-disable react-native/no-color-literals */
 const styles = StyleSheet.create({
   container: {
     flexDirection: "row",
@@ -91,6 +91,11 @@ const styles = StyleSheet.create({
     shadowRadius: 4,
     elevation: 3,
   } as ViewStyle,
+  content: {
+    flex: 1,
+    paddingHorizontal: 12,
+    paddingVertical: 12,
+  } as ViewStyle,
   indicator: {
     width: 4,
     height: "100%",
@@ -98,20 +103,16 @@ const styles = StyleSheet.create({
     borderTopLeftRadius: 12,
     borderBottomLeftRadius: 12,
   } as ViewStyle,
-  content: {
-    flex: 1,
-    paddingHorizontal: 12,
-    paddingVertical: 12,
-  } as ViewStyle,
-  title: {
-    fontSize: 14,
-    fontWeight: "600",
-  } as TextStyle,
   message: {
     fontSize: 13,
     marginTop: 2,
   } as TextStyle,
+  title: {
+    fontSize: 14,
+    fontWeight: "600",
+  } as TextStyle,
 })
+/* eslint-enable react-native/no-color-literals */
 
 /**
  * Show an error toast

@@ -4,22 +4,26 @@ import {
   ViewStyle,
   TextStyle,
   ScrollView,
+  // eslint-disable-next-line no-restricted-imports
   TextInput,
   Pressable,
   FlatList,
   ActivityIndicator,
   RefreshControl,
   Dimensions,
+  StyleSheet,
 } from "react-native"
 import { useRouter } from "expo-router"
 import { useQuery } from "convex/react"
+import { Robot } from "phosphor-react-native"
 
-import { api } from "../../../convex/_generated/api"
+import { ListingCard, ListingData } from "@/components/ListingCard"
 import { Screen } from "@/components/Screen"
 import { Text } from "@/components/Text"
-import { ListingCard, ListingData } from "@/components/ListingCard"
 import { useAppTheme } from "@/theme/context"
 import type { ThemedStyle } from "@/theme/types"
+
+import { api } from "../../../convex/_generated/api"
 
 const SCREEN_WIDTH = Dimensions.get("window").width
 const COLUMN_GAP = 12
@@ -176,6 +180,18 @@ export default function HomeScreen() {
           />
         }
       />
+
+      {/* AI Assistant Floating Action Button */}
+      <Pressable
+        style={({ pressed }) => [
+          styles.fab,
+          { backgroundColor: theme.colors.tint },
+          pressed && styles.fabPressed,
+        ]}
+        onPress={() => router.push("/assistant")}
+      >
+        <Robot size={28} color="#FFFFFF" weight="fill" />
+      </Pressable>
     </Screen>
   )
 }
@@ -263,3 +279,28 @@ const $emptySubtext: ThemedStyle<TextStyle> = ({ colors }) => ({
   color: colors.textDim,
   textAlign: "center",
 })
+
+// StyleSheet for FAB (non-themed)
+/* eslint-disable react-native/no-color-literals */
+const styles = StyleSheet.create({
+  fab: {
+    alignItems: "center",
+    borderRadius: 28,
+    bottom: 24,
+    elevation: 8,
+    height: 56,
+    justifyContent: "center",
+    position: "absolute",
+    right: 16,
+    shadowColor: "#000",
+    shadowOffset: { width: 0, height: 4 },
+    shadowOpacity: 0.3,
+    shadowRadius: 8,
+    width: 56,
+  },
+  fabPressed: {
+    opacity: 0.9,
+    transform: [{ scale: 0.95 }],
+  },
+})
+/* eslint-enable react-native/no-color-literals */
