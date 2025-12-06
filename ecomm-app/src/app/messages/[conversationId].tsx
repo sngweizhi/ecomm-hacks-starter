@@ -14,6 +14,7 @@ import {
 } from "react-native"
 import { useLocalSearchParams, router } from "expo-router"
 import { useQuery, useMutation } from "convex/react"
+import { useSafeAreaInsets } from "react-native-safe-area-context"
 
 import { Icon } from "@/components/Icon"
 import { Screen } from "@/components/Screen"
@@ -29,6 +30,7 @@ export default function ConversationScreen() {
   const { conversationId } = useLocalSearchParams<{ conversationId: string }>()
   const { themed, theme } = useAppTheme()
   const { userId, isAuthenticated } = useAuth()
+  const insets = useSafeAreaInsets()
   const [message, setMessage] = useState("")
   const flatListRef = useRef<FlatList>(null)
 
@@ -239,7 +241,7 @@ export default function ConversationScreen() {
         />
 
         {/* Message input */}
-        <View style={themed($inputContainer)}>
+        <View style={[themed($inputContainer), { paddingBottom: Math.max(insets.bottom, 16) }]}>
           <TextInput
             style={themed($input)}
             placeholder="Type a message..."
@@ -423,7 +425,8 @@ const $emptySubtitle: ThemedStyle<TextStyle> = ({ colors, spacing }) => ({
 const $inputContainer: ThemedStyle<ViewStyle> = ({ colors, spacing }) => ({
   flexDirection: "row",
   alignItems: "flex-end",
-  padding: spacing.md,
+  paddingHorizontal: spacing.md,
+  paddingTop: spacing.md,
   borderTopWidth: 1,
   borderTopColor: colors.separator,
   backgroundColor: colors.background,

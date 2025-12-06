@@ -12,13 +12,22 @@ import {
   TextInput,
   // eslint-disable-next-line no-restricted-imports
   type TextInput as TextInputType,
-  ActivityIndicator,
 } from "react-native"
 import { router } from "expo-router"
+import { useSafeAreaInsets } from "react-native-safe-area-context"
 import { useUIMessages, useSmoothText, optimisticallySendMessage } from "@convex-dev/agent/react"
 import type { UIMessage } from "@convex-dev/agent/react"
 import { useMutation, useQuery } from "convex/react"
 import { CaretRight, PaperPlaneTilt, Stop, ChatCircle } from "phosphor-react-native"
+import Animated, {
+  Easing,
+  useAnimatedStyle,
+  useSharedValue,
+  withRepeat,
+  withSequence,
+  withTiming,
+  type SharedValue,
+} from "react-native-reanimated"
 
 import { Screen } from "@/components/Screen"
 import { Text } from "@/components/Text"
@@ -27,16 +36,26 @@ import type { ThemedStyle } from "@/theme/types"
 
 import { MarkdownContent } from "./MarkdownContent"
 import { ProductChatCard } from "./ProductChatCard"
+import { Spinner } from "./Spinner"
 import { api } from "../../convex/_generated/api"
 import type { Id } from "../../convex/_generated/dataModel"
 
-// Suggested starter questions for the shopping assistant
-const STARTER_QUESTIONS = [
-  "What electronics are available?",
-  "Show me items under $50",
-  "I&apos;m looking for textbooks",
-  "What's popular right now?",
-]
+interface ToolCallInfo {
+  type: string
+  toolCallId: string
+  state?: string
+}
+
+const TOOL_DISPLAY_NAMES: Record<string, { pending: string; completed: string }> = {
+  searchProducts: {
+    pending: "Searching products",
+    completed: "Searched products",
+  },
+  searchListingsRag: {
+    pending: "Searching products",
+    completed: "Searched products",
+  },
+}
 
 // Local optimistic message type (before server confirms)
 interface LocalMessage {
@@ -55,6 +74,7 @@ export function MarketplaceChatView() {
     theme: { colors },
     themed,
   } = useAppTheme()
+  const insets = useSafeAreaInsets()
 
   // Get or create user's chat thread
   const existingThreadId = useQuery(api.chat.getUserChatThreadId)
@@ -66,13 +86,22 @@ export function MarketplaceChatView() {
 
   // Local optimistic messages (before thread exists)
   const [localMessages, setLocalMessages] = useState<LocalMessage[]>([])
-  const [showStarters, setShowStarters] = useState(true)
   const [isWaitingForAgent, setIsWaitingForAgent] = useState(false)
 
   const [inputText, setInputText] = useState("")
 
   const flatListRef = useRef<FlatList<UIMessage | LocalMessage>>(null)
   const inputRef = useRef<TextInputType>(null)
+  const spinnerRotation = useSharedValue(0)
+
+  // Persistent spinner rotation for shared animation across components
+  useEffect(() => {
+    spinnerRotation.value = withRepeat(
+      withTiming(360, { duration: 800, easing: Easing.linear }),
+      -1,
+      false,
+    )
+  }, [spinnerRotation])
 
   // Fetch messages with streaming support (only when we have a thread)
   const {
@@ -84,6 +113,20 @@ export function MarketplaceChatView() {
     effectiveThreadId ? { threadId: effectiveThreadId } : "skip",
     { initialNumItems: 50, stream: true },
   )
+
+  // Auto-create a chat thread so users land directly in their conversation
+  useEffect(() => {
+    if (existingThreadId === undefined || localThreadId) return
+    if (existingThreadId === null) {
+      createUserChat({})
+        .then((threadId) => {
+          setLocalThreadId(threadId)
+        })
+        .catch((error) => {
+          console.error("[Chat] Create thread error:", error)
+        })
+    }
+  }, [existingThreadId, localThreadId, createUserChat])
 
   // Mutations
   const sendMessage = useMutation(api.chat.sendMessage).withOptimisticUpdate(
@@ -122,13 +165,6 @@ export function MarketplaceChatView() {
     }
   }, [streamingMessage])
 
-  // Hide starters once we have messages
-  useEffect(() => {
-    if (hasServerMessages) {
-      setShowStarters(false)
-    }
-  }, [hasServerMessages])
-
   // Clear local messages once server messages arrive
   useEffect(() => {
     if (hasServerMessages && localMessages.length > 0) {
@@ -154,9 +190,6 @@ export function MarketplaceChatView() {
       // Clear input immediately
       setInputText("")
       Keyboard.dismiss()
-
-      // Hide starters immediately
-      setShowStarters(false)
 
       // Add optimistic user message to local state
       const tempUserMessage: LocalMessage = {
@@ -194,14 +227,6 @@ export function MarketplaceChatView() {
       }
     },
     [inputText, effectiveThreadId, isWaitingForAgent, isStreaming, createUserChat, sendMessage],
-  )
-
-  // Handle starter prompt press
-  const handleStarterPress = useCallback(
-    (question: string) => {
-      handleSend(question)
-    },
-    [handleSend],
   )
 
   // Handle submit from input
@@ -248,11 +273,12 @@ export function MarketplaceChatView() {
             isUser={isUser}
             productIdMap={productIdMap}
             onProductPress={handleProductPress}
+            spinnerRotation={spinnerRotation}
           />
         </View>
       )
     },
-    [themed, productIdMap, handleProductPress],
+    [themed, productIdMap, handleProductPress, spinnerRotation],
   )
 
   // Render a local optimistic message
@@ -294,70 +320,41 @@ export function MarketplaceChatView() {
         behavior={Platform.OS === "ios" ? "padding" : "height"}
         keyboardVerticalOffset={Platform.OS === "ios" ? 0 : 0}
       >
-        {/* Starter Prompts */}
-        {showStarters && displayMessages.length === 0 ? (
-          <View style={themed($starterContainer)}>
-            <View style={themed($iconContainer)}>
-              <ChatCircle size={48} color={colors.tint} weight="fill" />
-            </View>
-            <Text style={themed($starterTitle)}>Find what you need</Text>
-            <Text style={themed($starterSubtitle)}>
-              Ask me about products, and I&apos;ll help you find the best deals
-            </Text>
-
-            <View style={themed($startersWrapper)}>
-              {STARTER_QUESTIONS.map((question) => (
-                <Pressable
-                  key={question}
-                  onPress={() => handleStarterPress(question)}
-                  style={({ pressed }) => [
-                    themed($starterButton),
-                    pressed && themed($starterButtonPressed),
-                  ]}
-                >
-                  <Text style={themed($starterText)}>{question}</Text>
-                  <CaretRight size={16} color={colors.tint} />
-                </Pressable>
-              ))}
-            </View>
-          </View>
-        ) : (
-          /* Messages List */
-          <FlatList<UIMessage | LocalMessage>
-            ref={flatListRef}
-            data={displayMessages}
-            renderItem={renderMessage}
-            keyExtractor={(item) => item.key}
-            contentContainerStyle={themed($messagesContent)}
-            showsVerticalScrollIndicator={false}
-            onStartReached={hasServerMessages ? handleLoadMore : undefined}
-            onStartReachedThreshold={0.1}
-            ListHeaderComponent={
-              hasServerMessages && status === "LoadingMore" ? (
-                <View style={themed($loadingMore)}>
-                  <ActivityIndicator size="small" color={colors.tint} />
-                </View>
-              ) : null
-            }
-            ListEmptyComponent={
-              <View style={themed($emptyMessages)}>
-                <Text style={themed($emptyMessagesText)}>Start a conversation...</Text>
+        {/* Messages List */}
+        <FlatList<UIMessage | LocalMessage>
+          ref={flatListRef}
+          data={displayMessages}
+          renderItem={renderMessage}
+          keyExtractor={(item) => item.key}
+          contentContainerStyle={themed($messagesContent)}
+          showsVerticalScrollIndicator={false}
+          onStartReached={hasServerMessages ? handleLoadMore : undefined}
+          onStartReachedThreshold={0.1}
+          ListHeaderComponent={
+            hasServerMessages && status === "LoadingMore" ? (
+              <View style={themed($loadingMore)}>
+                <Spinner size={20} color={colors.tint} sharedRotation={spinnerRotation} />
               </View>
-            }
-            ListFooterComponent={
-              isWaitingForAgent && !streamingMessage ? (
-                <View style={[themed($messageContainer), themed($assistantMessageContainer)]}>
-                  <View style={themed($assistantBubble)}>
-                    <ActivityIndicator size="small" color={colors.tint} />
-                  </View>
+            ) : null
+          }
+          ListEmptyComponent={
+            <View style={themed($emptyMessages)}>
+              <Text style={themed($emptyMessagesText)}>Start a conversation...</Text>
+            </View>
+          }
+          ListFooterComponent={
+            isWaitingForAgent && !streamingMessage ? (
+              <View style={[themed($messageContainer), themed($assistantMessageContainer)]}>
+                <View style={themed($assistantBubble)}>
+                  <Spinner size={20} color={colors.tint} sharedRotation={spinnerRotation} />
                 </View>
-              ) : null
-            }
-          />
-        )}
+              </View>
+            ) : null
+          }
+        />
 
         {/* Input Bar */}
-        <View style={themed($inputContainer)}>
+        <View style={[themed($inputContainer), { paddingBottom: Math.max(insets.bottom, 8) }]}>
           <TextInput
             ref={inputRef}
             style={themed($input)}
@@ -412,16 +409,13 @@ const PRODUCT_ID_REGEX = /\[(\d+)\]\s*ID:\s*([^\n\s]+)/g
  */
 function extractProductIdMap(messages: UIMessage[]): Map<number, Id<"listings">> {
   const productIdMap = new Map<number, Id<"listings">>()
+  const toolTypes = new Set(["tool-searchProducts", "tool-searchListingsRag"])
 
   for (const message of messages) {
     if (!message.parts) continue
 
     for (const part of message.parts) {
-      if (
-        part.type === "tool-searchProducts" &&
-        "output" in part &&
-        typeof part.output === "string"
-      ) {
+      if (toolTypes.has(part.type as string) && "output" in part && typeof part.output === "string") {
         const output = part.output as string
         let match: RegExpExecArray | null
 
@@ -440,6 +434,151 @@ function extractProductIdMap(messages: UIMessage[]): Map<number, Id<"listings">>
 }
 
 // ============================================================================
+// Tool Call Helpers
+// ============================================================================
+
+function extractToolCalls(message: UIMessage): ToolCallInfo[] {
+  if (!message.parts) return []
+
+  const toolCalls: ToolCallInfo[] = []
+  for (const part of message.parts) {
+    if ("toolCallId" in part && (part.type as string).startsWith("tool-")) {
+      const typedPart = part as { type: string; toolCallId: string; state?: string }
+      toolCalls.push({
+        type: typedPart.type,
+        toolCallId: typedPart.toolCallId,
+        state: typedPart.state,
+      })
+    }
+  }
+  return toolCalls
+}
+
+function getToolDisplayName(toolType: string, isCompleted: boolean): string {
+  const toolName = toolType.replace("tool-", "")
+  const customNames = TOOL_DISPLAY_NAMES[toolName]
+  if (customNames) {
+    return isCompleted ? customNames.completed : customNames.pending
+  }
+
+  const readable = toolName
+    .replace(/([A-Z])/g, " $1")
+    .toLowerCase()
+    .trim()
+
+  return readable.charAt(0).toUpperCase() + readable.slice(1)
+}
+
+interface ToolCallTextProps {
+  toolCalls: ToolCallInfo[]
+  isStreaming: boolean
+}
+
+function ShimmerChar({
+  char,
+  index,
+  shimmerPosition,
+  isActive,
+  baseStyle,
+}: {
+  char: string
+  index: number
+  shimmerPosition: SharedValue<number>
+  isActive: boolean
+  baseStyle: TextStyle
+}) {
+  const charStyle = useAnimatedStyle(() => {
+    "worklet"
+    if (!isActive) {
+      return { opacity: 1 }
+    }
+    const distance = Math.abs(shimmerPosition.value - index)
+    const waveWidth = 3
+    if (distance > waveWidth) {
+      return { opacity: 0.4 }
+    }
+    const intensity = 1 - distance / waveWidth
+    return { opacity: 0.4 + intensity * 0.6 }
+  })
+
+  return <Animated.Text style={[baseStyle, charStyle]}>{char}</Animated.Text>
+}
+
+function ToolCallText({ toolCalls, isStreaming }: ToolCallTextProps) {
+  const { themed } = useAppTheme()
+  const shimmerPosition = useSharedValue(-1)
+
+  const hasActiveToolCall = toolCalls.some(
+    (tc) => tc.state === "input-streaming" || tc.state === "input-available",
+  )
+
+  const toolsByType = toolCalls.reduce(
+    (acc, tc) => {
+      const type = tc.type
+      if (!acc[type]) {
+        acc[type] = { type, isCompleted: false }
+      }
+      if (tc.state === "output-available" || tc.state === "output-error") {
+        acc[type].isCompleted = true
+      }
+      return acc
+    },
+    {} as Record<string, { type: string; isCompleted: boolean }>,
+  )
+
+  const uniqueTools = Object.values(toolsByType)
+  const displayTool = uniqueTools.find((t) => !t.isCompleted) || uniqueTools[uniqueTools.length - 1]
+  const displayText = displayTool
+    ? getToolDisplayName(displayTool.type, displayTool.isCompleted)
+    : ""
+
+  const characters = displayText.split("")
+  const textLength = characters.length
+
+  useEffect(() => {
+    if (!displayText) {
+      shimmerPosition.value = -1
+      return
+    }
+    const waveWidth = 3
+    if (isStreaming || hasActiveToolCall) {
+      shimmerPosition.value = withRepeat(
+        withSequence(
+          withTiming(textLength + waveWidth, {
+            duration: 1500,
+            easing: Easing.linear,
+          }),
+          withTiming(-waveWidth, { duration: 0 }),
+        ),
+        -1,
+        false,
+      )
+    } else {
+      shimmerPosition.value = -1
+    }
+  }, [displayText, textLength, isStreaming, hasActiveToolCall, shimmerPosition])
+
+  if (!displayText) return null
+
+  const baseStyle = themed($toolCallText)
+
+  return (
+    <Animated.Text style={baseStyle}>
+      {characters.map((char, index) => (
+        <ShimmerChar
+          key={`${char}-${index}`}
+          char={char}
+          index={index}
+          shimmerPosition={shimmerPosition}
+          isActive={isStreaming || hasActiveToolCall}
+          baseStyle={baseStyle}
+        />
+      ))}
+    </Animated.Text>
+  )
+}
+
+// ============================================================================
 // Message Bubble Component
 // ============================================================================
 
@@ -448,21 +587,42 @@ interface MessageBubbleProps {
   isUser: boolean
   productIdMap: Map<number, Id<"listings">>
   onProductPress: (listingId: Id<"listings">) => void
+  spinnerRotation?: SharedValue<number>
 }
 
-function MessageBubble({ message, isUser, productIdMap, onProductPress }: MessageBubbleProps) {
+function MessageBubble({
+  message,
+  isUser,
+  productIdMap,
+  onProductPress,
+  spinnerRotation,
+}: MessageBubbleProps) {
   const {
     theme: { colors },
     themed,
   } = useAppTheme()
+  const [showThinking, setShowThinking] = useState(false)
 
   const isStreaming = message.status === "streaming"
+  const isPending = message.status === "pending"
   const isFailed = message.status === "failed"
+  const isStreamingOrPending = isStreaming || isPending
 
   // Use smooth text for streaming
   const [visibleText] = useSmoothText(message.text || "", {
-    startStreaming: isStreaming,
+    startStreaming: isStreamingOrPending,
   })
+
+  const reasoningText =
+    message.parts
+      ?.filter((p) => p.type === "reasoning" && "text" in p)
+      .map((p) => (p as { type: "reasoning"; text: string }).text)
+      .join("\n") ?? ""
+  const [visibleReasoning] = useSmoothText(reasoningText, {
+    startStreaming: isStreamingOrPending,
+  })
+
+  const toolCalls = extractToolCalls(message)
 
   const displayText = visibleText || message.text || ""
 
@@ -488,10 +648,44 @@ function MessageBubble({ message, isUser, productIdMap, onProductPress }: Messag
   // Remove product citation markers from display text
   const cleanedText = displayText.replace(/\[\[product:[0-9,]+\]\]/g, "").trim()
 
+  const hasThinking = !isUser && visibleReasoning.length > 0
+  const hasToolCalls = !isUser && toolCalls.length > 0
+
+  const chevronRotation = useSharedValue(0)
+  useEffect(() => {
+    chevronRotation.value = withTiming(showThinking ? 90 : 0, {
+      duration: 200,
+      easing: Easing.out(Easing.cubic),
+    })
+  }, [showThinking, chevronRotation])
+
+  const chevronAnimatedStyle = useAnimatedStyle(() => ({
+    transform: [{ rotate: `${chevronRotation.value}deg` }],
+  }))
+
   return (
     <View
       style={[themed(isUser ? $userBubble : $assistantBubble), isFailed && themed($failedBubble)]}
     >
+      {/* Thinking/Reasoning Section */}
+      {hasThinking && (
+        <View style={themed($thinkingContainer)}>
+          <Pressable onPress={() => setShowThinking(!showThinking)} style={themed($thinkingHeader)}>
+            <Text style={themed($thinkingLabel)}>
+              {isStreamingOrPending ? "Thinking..." : "Thinking"}
+            </Text>
+            <Animated.View style={chevronAnimatedStyle}>
+              <CaretRight size={12} color={colors.textDim} />
+            </Animated.View>
+          </Pressable>
+          {showThinking && (
+            <Animated.View>
+              <Text style={themed($thinkingText)}>{visibleReasoning}</Text>
+            </Animated.View>
+          )}
+        </View>
+      )}
+
       {/* Error State */}
       {isFailed && (
         <View style={themed($errorContainer)}>
@@ -505,11 +699,16 @@ function MessageBubble({ message, isUser, productIdMap, onProductPress }: Messag
           isUser ? (
             <Text style={themed($userBubbleText)}>{cleanedText}</Text>
           ) : (
-            <MarkdownContent content={cleanedText} />
+            <MarkdownContent content={cleanedText} isStreaming={isStreamingOrPending} />
           )
         ) : null}
-        {!isUser && isStreaming && !cleanedText && (
-          <ActivityIndicator size="small" color={colors.tint} />
+        {!isUser && isStreamingOrPending && !cleanedText && (
+          <>
+            <Spinner size={18} color={colors.tint} sharedRotation={spinnerRotation} />
+            {hasToolCalls && (
+              <ToolCallText toolCalls={toolCalls} isStreaming={isStreamingOrPending} />
+            )}
+          </>
         )}
       </View>
 
@@ -555,65 +754,6 @@ const $headerTitle: ThemedStyle<TextStyle> = ({ colors }) => ({
 })
 
 const $keyboardAvoid: ThemedStyle<ViewStyle> = () => ({
-  flex: 1,
-})
-
-// Starter styles
-const $starterContainer: ThemedStyle<ViewStyle> = ({ spacing }) => ({
-  flex: 1,
-  justifyContent: "center",
-  alignItems: "center",
-  paddingHorizontal: spacing.xl,
-})
-
-const $iconContainer: ThemedStyle<ViewStyle> = ({ colors, spacing }) => ({
-  width: 96,
-  height: 96,
-  borderRadius: 48,
-  backgroundColor: colors.tint + "20",
-  justifyContent: "center",
-  alignItems: "center",
-  marginBottom: spacing.lg,
-})
-
-const $starterTitle: ThemedStyle<TextStyle> = ({ colors, spacing }) => ({
-  fontSize: 24,
-  fontWeight: "700",
-  color: colors.text,
-  textAlign: "center",
-  marginBottom: spacing.xs,
-})
-
-const $starterSubtitle: ThemedStyle<TextStyle> = ({ colors, spacing }) => ({
-  fontSize: 15,
-  color: colors.textDim,
-  textAlign: "center",
-  lineHeight: 22,
-  marginBottom: spacing.xl,
-})
-
-const $startersWrapper: ThemedStyle<ViewStyle> = () => ({
-  width: "100%",
-})
-
-const $starterButton: ThemedStyle<ViewStyle> = ({ colors, spacing }) => ({
-  flexDirection: "row",
-  alignItems: "center",
-  justifyContent: "space-between",
-  backgroundColor: colors.palette.neutral100,
-  borderRadius: 12,
-  paddingHorizontal: spacing.md,
-  paddingVertical: spacing.sm,
-  marginBottom: spacing.xs,
-})
-
-const $starterButtonPressed: ThemedStyle<ViewStyle> = ({ colors }) => ({
-  backgroundColor: colors.palette.neutral200,
-})
-
-const $starterText: ThemedStyle<TextStyle> = ({ colors }) => ({
-  fontSize: 15,
-  color: colors.text,
   flex: 1,
 })
 
@@ -680,6 +820,33 @@ const $responseRow: ThemedStyle<ViewStyle> = ({ spacing }) => ({
   alignItems: "center",
   flexWrap: "wrap",
   gap: spacing.xs,
+})
+
+const $thinkingContainer: ThemedStyle<ViewStyle> = ({ colors, spacing }) => ({
+  marginBottom: spacing.xs,
+  paddingBottom: spacing.xs,
+  borderBottomWidth: 1,
+  borderBottomColor: colors.separator,
+})
+
+const $thinkingHeader: ThemedStyle<ViewStyle> = ({ spacing }) => ({
+  flexDirection: "row",
+  alignItems: "center",
+  gap: spacing.xs,
+})
+
+const $thinkingLabel: ThemedStyle<TextStyle> = ({ colors }) => ({
+  fontSize: 12,
+  fontWeight: "500",
+  color: colors.textDim,
+  fontStyle: "italic",
+})
+
+const $thinkingText: ThemedStyle<TextStyle> = ({ colors, spacing }) => ({
+  fontSize: 13,
+  lineHeight: 18,
+  color: colors.textDim,
+  marginTop: spacing.xs,
 })
 
 const $failedBubble: ThemedStyle<ViewStyle> = () => ({})
@@ -759,4 +926,10 @@ const $stopButton: ThemedStyle<ViewStyle> = ({ colors }) => ({
 
 const $stopButtonPressed: ThemedStyle<ViewStyle> = ({ colors }) => ({
   backgroundColor: colors.error + "CC",
+})
+
+const $toolCallText: ThemedStyle<TextStyle> = ({ colors, spacing }) => ({
+  fontSize: 13,
+  color: colors.textDim,
+  marginLeft: spacing.xs,
 })

@@ -17,6 +17,7 @@ import {
   Clock,
   Desktop,
   DotsThree,
+  DotsThreeVertical,
   DotsThreeCircle,
   Eye,
   EyeSlash,
@@ -66,6 +67,7 @@ export const iconRegistry = {
   settings: GearSix,
   menu: List,
   more: DotsThree,
+  moreVertical: DotsThreeVertical,
   share: ShareNetwork,
 
   // Visibility

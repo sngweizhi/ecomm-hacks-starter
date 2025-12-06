@@ -12,7 +12,7 @@ import { useAppTheme } from "@/theme/context"
 import type { ThemedStyle } from "@/theme/types"
 import { showErrorToast } from "@/utils/toast"
 
-const welcomeLogo = require("@assets/images/logo.png")
+const welcomeLogo = require("@assets/images/logo_new.png")
 
 // Handle any pending authentication sessions
 WebBrowser.maybeCompleteAuthSession()

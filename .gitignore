@@ -31,6 +31,3 @@ venv/
 .python-version
 
 # Excluded directories
-Zeika/
-react-demo-app/
-

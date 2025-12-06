@@ -14,10 +14,10 @@ export const PCM_CONFIG = {
    */
   audioSource: 6,
   /**
-   * Buffer size in bytes. 4096 gives ~128ms chunks at 16kHz mono 16-bit.
+   * Buffer size in bytes. 2048 gives ~64ms chunks at 16kHz mono 16-bit.
    * Smaller = lower latency but more overhead.
    */
-  bufferSize: 4096,
+  bufferSize: 2048,
 } as const
 
 export type PcmAudioStreamState = "idle" | "starting" | "streaming" | "error"
@@ -31,6 +31,10 @@ export type UsePcmAudioStreamOptions = {
    * Called on errors.
    */
   onError?: (error: unknown) => void
+  /**
+   * Called with a smoothed 0-1 RMS level derived from the PCM chunk.
+   */
+  onLevel?: (level: number) => void
 }
 
 // Access the native module directly to avoid type issues with the library's d.ts
@@ -53,19 +57,87 @@ const RNLiveAudioStream = NativeModules.RNLiveAudioStream as
  * Only works on native platforms (iOS/Android). Returns no-op on web.
  */
 export function usePcmAudioStream(options: UsePcmAudioStreamOptions = {}) {
-  const { onData, onError } = options
+  const { onData, onError, onLevel } = options
   const [state, setState] = useState<PcmAudioStreamState>("idle")
+  const [level, setLevel] = useState(0)
   const subscriptionRef = useRef<{ remove: () => void } | null>(null)
   const isInitializedRef = useRef(false)
   const eventEmitterRef = useRef<NativeEventEmitter | null>(null)
+  const chunkCountRef = useRef(0)
+  const levelRef = useRef(0)
 
   // Store callbacks in refs to avoid re-subscriptions
   const onDataRef = useRef(onData)
   const onErrorRef = useRef(onError)
+  const onLevelRef = useRef(onLevel)
   useEffect(() => {
     onDataRef.current = onData
     onErrorRef.current = onError
-  }, [onData, onError])
+    onLevelRef.current = onLevel
+  }, [onData, onError, onLevel])
+
+  const decodeBase64ToBytes = useCallback((base64: string) => {
+    if (!base64) return null
+    try {
+      if (typeof globalThis.atob === "function") {
+        const binary = globalThis.atob(base64)
+        const bytes = new Uint8Array(binary.length)
+        for (let i = 0; i < binary.length; i++) {
+          bytes[i] = binary.charCodeAt(i)
+        }
+        return bytes
+      }
+      throw new Error("atob not available")
+    } catch {
+      const base64Chars = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/"
+      const lookup = new Uint8Array(256)
+      for (let i = 0; i < base64Chars.length; i++) {
+        lookup[base64Chars.charCodeAt(i)] = i
+      }
+
+      const padding = base64.endsWith("==") ? 2 : base64.endsWith("=") ? 1 : 0
+      const bufferLength = (base64.length * 3) / 4 - padding
+      const bytes = new Uint8Array(bufferLength)
+
+      let p = 0
+      for (let i = 0; i < base64.length; i += 4) {
+        const encoded1 = lookup[base64.charCodeAt(i)]
+        const encoded2 = lookup[base64.charCodeAt(i + 1)]
+        const encoded3 = lookup[base64.charCodeAt(i + 2)]
+        const encoded4 = lookup[base64.charCodeAt(i + 3)]
+
+        bytes[p++] = (encoded1 << 2) | (encoded2 >> 4)
+        if (p < bufferLength) bytes[p++] = ((encoded2 & 15) << 4) | (encoded3 >> 2)
+        if (p < bufferLength) bytes[p++] = ((encoded3 & 3) << 6) | (encoded4 & 63)
+      }
+
+      return bytes
+    }
+  }, [])
+
+  const computeRmsLevel = useCallback(
+    (base64: string) => {
+      const bytes = decodeBase64ToBytes(base64)
+      if (!bytes || bytes.byteLength < 2) return 0
+      const samples = new Int16Array(
+        bytes.buffer,
+        bytes.byteOffset,
+        Math.floor(bytes.byteLength / 2),
+      )
+      if (samples.length === 0) return 0
+
+      let sum = 0
+      for (let i = 0; i < samples.length; i++) {
+        const normalized = samples[i] / 32768
+        sum += normalized * normalized
+      }
+      const rms = Math.sqrt(sum / samples.length)
+      const smoothed = 0.3 * rms + 0.7 * levelRef.current
+      levelRef.current = smoothed
+      return Math.min(1, Math.max(0, smoothed))
+    },
+    [decodeBase64ToBytes],
+  )
 
   const start = useCallback(() => {
     // Only run on native platforms
@@ -90,6 +162,10 @@ export function usePcmAudioStream(options: UsePcmAudioStreamOptions = {}) {
           audioSource: PCM_CONFIG.audioSource,
           bufferSize: PCM_CONFIG.bufferSize,
         })
+        console.log("[usePcmAudioStream] Initialized native stream", {
+          sampleRate: PCM_CONFIG.sampleRate,
+          bufferSize: PCM_CONFIG.bufferSize,
+        })
         isInitializedRef.current = true
       }
 
@@ -103,21 +179,35 @@ export function usePcmAudioStream(options: UsePcmAudioStreamOptions = {}) {
       // Remove any existing listener and add new one
       eventEmitterRef.current.removeAllListeners("data")
       subscriptionRef.current = eventEmitterRef.current.addListener("data", (data: string) => {
+        chunkCountRef.current += 1
+        if (chunkCountRef.current <= 3 || chunkCountRef.current % 25 === 0) {
+          console.log("[usePcmAudioStream] Audio chunk", {
+            sizeBytes: data.length,
+            chunk: chunkCountRef.current,
+          })
+        }
+        const levelValue = computeRmsLevel(data)
+        setLevel(levelValue)
+        onLevelRef.current?.(levelValue)
         onDataRef.current?.(data)
       })
 
       // Start the audio stream
       RNLiveAudioStream.start()
+      console.log("[usePcmAudioStream] Streaming started")
       setState("streaming")
     } catch (error) {
       console.error("Failed to start PCM audio stream:", error)
       setState("error")
       onErrorRef.current?.(error)
     }
-  }, [state])
+  }, [computeRmsLevel, state])
 
   const stop = useCallback(() => {
     if (Platform.OS === "web" || !RNLiveAudioStream) {
+      levelRef.current = 0
+      setLevel(0)
+      onLevelRef.current?.(0)
       return
     }
 
@@ -130,7 +220,14 @@ export function usePcmAudioStream(options: UsePcmAudioStreamOptions = {}) {
 
       // Stop the audio stream
       RNLiveAudioStream.stop()
+      console.log("[usePcmAudioStream] Streaming stopped after chunks", {
+        totalChunks: chunkCountRef.current,
+      })
+      chunkCountRef.current = 0
       setState("idle")
+      levelRef.current = 0
+      setLevel(0)
+      onLevelRef.current?.(0)
     } catch (error) {
       console.error("Failed to stop PCM audio stream:", error)
       onErrorRef.current?.(error)
@@ -161,5 +258,6 @@ export function usePcmAudioStream(options: UsePcmAudioStreamOptions = {}) {
     stop,
     sampleRate: PCM_CONFIG.sampleRate,
     mimeType: `audio/pcm;rate=${PCM_CONFIG.sampleRate}`,
+    level,
   }
 }

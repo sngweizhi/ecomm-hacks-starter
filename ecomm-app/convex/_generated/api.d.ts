@@ -8,6 +8,7 @@
  * @module
  */
 
+import type * as analyzeProductPhotos from "../analyzeProductPhotos.js";
 import type * as categories from "../categories.js";
 import type * as chat from "../chat.js";
 import type * as chatActions from "../chatActions.js";
@@ -20,6 +21,7 @@ import type * as lib_rag from "../lib/rag.js";
 import type * as listingEmbeddings from "../listingEmbeddings.js";
 import type * as listingEmbeddingsMutations from "../listingEmbeddingsMutations.js";
 import type * as listings from "../listings.js";
+import type * as listingsCollageProcessing from "../listingsCollageProcessing.js";
 import type * as marketplaceAgent from "../marketplaceAgent.js";
 import type * as productImageGeneration from "../productImageGeneration.js";
 import type * as productImageGenerationMutations from "../productImageGenerationMutations.js";
@@ -31,6 +33,7 @@ import type {
 } from "convex/server";
 
 declare const fullApi: ApiFromModules<{
+  analyzeProductPhotos: typeof analyzeProductPhotos;
   categories: typeof categories;
   chat: typeof chat;
   chatActions: typeof chatActions;
@@ -43,6 +46,7 @@ declare const fullApi: ApiFromModules<{
   listingEmbeddings: typeof listingEmbeddings;
   listingEmbeddingsMutations: typeof listingEmbeddingsMutations;
   listings: typeof listings;
+  listingsCollageProcessing: typeof listingsCollageProcessing;
   marketplaceAgent: typeof marketplaceAgent;
   productImageGeneration: typeof productImageGeneration;
   productImageGenerationMutations: typeof productImageGenerationMutations;

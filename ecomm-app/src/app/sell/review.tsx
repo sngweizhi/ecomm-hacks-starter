@@ -1,4 +1,4 @@
-import { useState, useEffect } from "react"
+import { useState, useEffect, useRef, useCallback } from "react"
 import {
   View,
   ViewStyle,
@@ -6,12 +6,12 @@ import {
   ScrollView,
   Pressable,
   ActivityIndicator,
-  Alert,
   Image,
   ImageStyle,
 } from "react-native"
 import { router, useLocalSearchParams } from "expo-router"
 import { useMutation, useQuery } from "convex/react"
+import { useSafeAreaInsets } from "react-native-safe-area-context"
 
 import { api } from "@/../convex/_generated/api"
 import type { Id } from "@/../convex/_generated/dataModel"
@@ -21,6 +21,7 @@ import { Header } from "@/components/Header"
 import { Screen } from "@/components/Screen"
 import { Text } from "@/components/Text"
 import { TextField } from "@/components/TextField"
+import { ActionSheet, type ActionSheetRef, type ActionSheetConfig } from "@/components/ActionSheet"
 import { useAuth } from "@/context/AuthContext"
 import { useAppTheme } from "@/theme/context"
 import type { ThemedStyle } from "@/theme/types"
@@ -38,6 +39,8 @@ import { showSuccessToast, showErrorToast } from "@/utils/toast"
 export default function SellReviewScreen() {
   const { themed, theme } = useAppTheme()
   const { isAuthenticated } = useAuth()
+  const actionSheetRef = useRef<ActionSheetRef>(null)
+  const insets = useSafeAreaInsets()
   const params = useLocalSearchParams<{
     listingId?: string
     videoUri?: string
@@ -66,6 +69,11 @@ export default function SellReviewScreen() {
   const createFromDraft = useMutation(api.listings.createFromDraft)
   const updateListing = useMutation(api.listings.update)
   const publish = useMutation(api.listings.publish)
+
+  const showSheet = useCallback(
+    (sheetConfig: ActionSheetConfig) => actionSheetRef.current?.present(sheetConfig),
+    [],
+  )
 
   // Initialize form with existing listing data or generate placeholder
   useEffect(() => {
@@ -112,10 +120,14 @@ export default function SellReviewScreen() {
 
   const handleSaveDraft = async () => {
     if (!isAuthenticated) {
-      Alert.alert("Sign In Required", "Please sign in to save drafts.", [
-        { text: "Cancel", style: "cancel" },
-        { text: "Sign In", onPress: () => router.push("/sign-in") },
-      ])
+      showSheet({
+        title: "Sign In Required",
+        message: "Please sign in to save drafts.",
+        actions: [
+          { text: "Cancel", style: "cancel" },
+          { text: "Sign In", style: "primary", onPress: () => router.push("/sign-in") },
+        ],
+      })
       return
     }
 
@@ -157,24 +169,40 @@ export default function SellReviewScreen() {
 
   const handlePublish = async () => {
     if (!isAuthenticated) {
-      Alert.alert("Sign In Required", "Please sign in to publish listings.", [
-        { text: "Cancel", style: "cancel" },
-        { text: "Sign In", onPress: () => router.push("/sign-in") },
-      ])
+      showSheet({
+        title: "Sign In Required",
+        message: "Please sign in to publish listings.",
+        actions: [
+          { text: "Cancel", style: "cancel" },
+          { text: "Sign In", style: "primary", onPress: () => router.push("/sign-in") },
+        ],
+      })
       return
     }
 
     // Validate required fields
     if (!title.trim()) {
-      Alert.alert("Missing Information", "Please enter a title for your listing.")
+      showSheet({
+        title: "Missing Information",
+        message: "Please enter a title for your listing.",
+        actions: [{ text: "Got it", style: "primary" }],
+      })
       return
     }
     if (!description.trim()) {
-      Alert.alert("Missing Information", "Please enter a description for your listing.")
+      showSheet({
+        title: "Missing Information",
+        message: "Please enter a description for your listing.",
+        actions: [{ text: "Got it", style: "primary" }],
+      })
       return
     }
     if (!price || parseFloat(price) <= 0) {
-      Alert.alert("Missing Information", "Please enter a valid price greater than $0.")
+      showSheet({
+        title: "Missing Information",
+        message: "Please enter a valid price greater than $0.",
+        actions: [{ text: "Got it", style: "primary" }],
+      })
       return
     }
 
@@ -211,16 +239,14 @@ export default function SellReviewScreen() {
 
       showSuccessToast("Success!", "Your listing is now live!")
 
-      Alert.alert("Success! 🎉", "Your listing is now live!", [
-        {
-          text: "View Listing",
-          onPress: () => router.replace(`/listing/${listingId}`),
-        },
-        {
-          text: "Go Home",
-          onPress: () => router.replace("/(tabs)"),
-        },
-      ])
+      showSheet({
+        title: "Success! 🎉",
+        message: "Your listing is now live!",
+        actions: [
+          { text: "View Listing", style: "primary", onPress: () => router.replace(`/listing/${listingId}`) },
+          { text: "Go Home", onPress: () => router.replace("/(tabs)") },
+        ],
+      })
     } catch (error) {
       console.error("Error publishing listing:", error)
       showErrorToast("Error", "Failed to publish listing. Please try again.")
@@ -230,14 +256,14 @@ export default function SellReviewScreen() {
   }
 
   const handleClose = () => {
-    Alert.alert("Discard Listing?", "Your changes will be lost.", [
-      { text: "Keep Editing", style: "cancel" },
-      {
-        text: "Discard",
-        style: "destructive",
-        onPress: () => router.replace("/(tabs)"),
-      },
-    ])
+    showSheet({
+      title: "Discard Listing?",
+      message: "Your changes will be lost.",
+      actions: [
+        { text: "Keep Editing", style: "cancel" },
+        { text: "Discard", style: "destructive", onPress: () => router.replace("/(tabs)") },
+      ],
+    })
   }
 
   // Show loading while fetching existing listing
@@ -262,8 +288,8 @@ export default function SellReviewScreen() {
         title="Review Listing"
         leftIcon="x"
         onLeftPress={handleClose}
-        rightText={params.source === "gemini-live" ? undefined : "Retake"}
-        onRightPress={params.source === "gemini-live" ? undefined : handleRetakeVideo}
+        rightText={params.source === "gemini-live" || params.source === "manual" ? undefined : "Retake"}
+        onRightPress={params.source === "gemini-live" || params.source === "manual" ? undefined : handleRetakeVideo}
         containerStyle={themed($header)}
       />
 
@@ -281,7 +307,13 @@ export default function SellReviewScreen() {
               <Text text="📸" style={themed($imageIcon)} />
               <Text text="Image Preview" style={themed($imagePreviewText)} />
               <Text
-                text={params.source === "gemini-live" ? "AI-generated photo" : "From camera"}
+                text={
+                  params.source === "gemini-live"
+                    ? "AI-generated photo"
+                    : params.source === "manual"
+                      ? "Manual upload"
+                      : "From camera"
+                }
                 style={themed($imageSourceText)}
               />
             </View>
@@ -292,6 +324,14 @@ export default function SellReviewScreen() {
         {params.source === "gemini-live" && (
           <View style={themed($aiBadgeContainer)}>
             <Text text="✨ AI-generated listing" style={themed($aiBadgeText)} />
+            <Text text="Review and edit before publishing" style={themed($aiBadgeSubtext)} />
+          </View>
+        )}
+
+        {/* Manual listing badge */}
+        {params.source === "manual" && (
+          <View style={themed($aiBadgeContainer)}>
+            <Text text="📸 Manual listing with AI collage" style={themed($aiBadgeText)} />
             <Text text="Review and edit before publishing" style={themed($aiBadgeSubtext)} />
           </View>
         )}
@@ -366,7 +406,7 @@ export default function SellReviewScreen() {
       </ScrollView>
 
       {/* Bottom Actions */}
-      <View style={themed($bottomActions)}>
+      <View style={[themed($bottomActions), { paddingBottom: Math.max(insets.bottom, 16) }]}>
         <Button
           text="Save Draft"
           preset="default"
@@ -382,6 +422,7 @@ export default function SellReviewScreen() {
           style={themed($publishButton)}
         />
       </View>
+      <ActionSheet ref={actionSheetRef} />
     </Screen>
   )
 }
@@ -538,7 +579,7 @@ const $bottomActions: ThemedStyle<ViewStyle> = ({ colors, spacing }) => ({
   flexDirection: "row",
   gap: spacing.md,
   paddingHorizontal: spacing.md,
-  paddingVertical: spacing.md,
+  paddingTop: spacing.md,
   borderTopWidth: 1,
   borderTopColor: colors.separator,
   backgroundColor: colors.background,

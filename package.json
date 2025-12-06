@@ -1,5 +1,6 @@
 {
 	"dependencies": {
-		"expo-image-manipulator": "^14.0.8"
+		"expo-image-manipulator": "^14.0.8",
+		"react-native-reanimated-carousel": "^4.0.3"
 	}
 }

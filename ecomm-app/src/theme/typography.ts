@@ -3,29 +3,43 @@
 
 import { Platform } from "react-native"
 import {
-  SpaceGrotesk_300Light as spaceGroteskLight,
-  SpaceGrotesk_400Regular as spaceGroteskRegular,
-  SpaceGrotesk_500Medium as spaceGroteskMedium,
-  SpaceGrotesk_600SemiBold as spaceGroteskSemiBold,
-  SpaceGrotesk_700Bold as spaceGroteskBold,
-} from "@expo-google-fonts/space-grotesk"
+  DMSans_400Regular as dmSansRegular,
+  DMSans_500Medium as dmSansMedium,
+  DMSans_700Bold as dmSansBold,
+} from "@expo-google-fonts/dm-sans"
+import {
+  Sora_400Regular as soraRegular,
+  Sora_500Medium as soraMedium,
+  Sora_600SemiBold as soraSemiBold,
+  Sora_700Bold as soraBold,
+} from "@expo-google-fonts/sora"
 
 export const customFontsToLoad = {
-  spaceGroteskLight,
-  spaceGroteskRegular,
-  spaceGroteskMedium,
-  spaceGroteskSemiBold,
-  spaceGroteskBold,
+  dmSansRegular,
+  dmSansMedium,
+  dmSansBold,
+  soraRegular,
+  soraMedium,
+  soraSemiBold,
+  soraBold,
 }
 
 const fonts = {
-  spaceGrotesk: {
-    // Cross-platform Google font.
-    light: "spaceGroteskLight",
-    normal: "spaceGroteskRegular",
-    medium: "spaceGroteskMedium",
-    semiBold: "spaceGroteskSemiBold",
-    bold: "spaceGroteskBold",
+  sora: {
+    // Primary display/headline font.
+    light: "soraRegular",
+    normal: "soraRegular",
+    medium: "soraMedium",
+    semiBold: "soraSemiBold",
+    bold: "soraBold",
+  },
+  dmSans: {
+    // Primary body/UI font.
+    light: "dmSansRegular",
+    normal: "dmSansRegular",
+    medium: "dmSansMedium",
+    semiBold: "dmSansBold",
+    bold: "dmSansBold",
   },
   helveticaNeue: {
     // iOS only font.
@@ -59,11 +73,17 @@ export const typography = {
   /**
    * The primary font. Used in most places.
    */
-  primary: fonts.spaceGrotesk,
+  primary: fonts.sora,
   /**
    * An alternate font used for perhaps titles and stuff.
    */
-  secondary: Platform.select({ ios: fonts.helveticaNeue, android: fonts.sansSerif }),
+  secondary: Platform.select(
+    {
+      ios: { ...fonts.dmSans, ...fonts.helveticaNeue },
+      android: { ...fonts.dmSans, ...fonts.sansSerif },
+    },
+    // fallback for web/native
+  ) ?? fonts.dmSans,
   /**
    * Lets get fancy with a monospace font!
    */

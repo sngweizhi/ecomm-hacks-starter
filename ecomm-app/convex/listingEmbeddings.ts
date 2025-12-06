@@ -131,6 +131,121 @@ export const searchProducts = internalAction({
   },
 })
 
+/**
+ * RAG-powered search that returns listing details plus matched text
+ * Used by the shopping assistant agent for inline recommendations
+ */
+export const searchListingsRag = internalAction({
+  args: {
+    query: v.string(),
+    limit: v.optional(v.number()),
+    vectorScoreThreshold: v.optional(v.number()),
+  },
+  returns: v.object({
+    results: v.array(
+      v.object({
+        listingId: v.string(),
+        title: v.string(),
+        description: v.string(),
+        price: v.number(),
+        category: v.string(),
+        snippet: v.string(),
+        score: v.number(),
+      }),
+    ),
+    text: v.string(),
+  }),
+  handler: async (ctx, args) => {
+    const limit = args.limit ?? 8
+    const vectorScoreThreshold = args.vectorScoreThreshold ?? 0.3
+
+    const namespace = await rag.getNamespace(ctx, {
+      namespace: PRODUCTS_NAMESPACE,
+    })
+
+    if (!namespace) {
+      console.log("[RAG Search] No products namespace found - no products indexed yet")
+      return { results: [], text: "" }
+    }
+
+    const { results: vectorResults, entries, text } = await rag.search(ctx, {
+      namespace: PRODUCTS_NAMESPACE,
+      query: args.query,
+      limit: limit * 2, // over-fetch to improve diversity
+      vectorScoreThreshold,
+      chunkContext: { before: 1, after: 0 },
+    })
+
+    if (!vectorResults || vectorResults.length === 0) {
+      return { results: [], text: text ?? "" }
+    }
+
+    // Map entryId -> listingId
+    const entryToListingId = new Map<string, string>()
+    for (const entry of entries) {
+      if (entry.key) {
+        entryToListingId.set(entry.entryId, entry.key)
+      }
+    }
+
+    // Deduplicate and keep best score/snippet per listing
+    const listingScores = new Map<
+      string,
+      { score: number; text: string; entryId: string }
+    >()
+    for (const result of vectorResults) {
+      const listingId = entryToListingId.get(result.entryId) ?? result.entryId
+      const existing = listingScores.get(listingId)
+      if (!existing || result.score > existing.score) {
+        listingScores.set(listingId, {
+          score: result.score,
+          text: result.content[0]?.text ?? "",
+          entryId: result.entryId,
+        })
+      }
+    }
+
+    const topListingIds = [...listingScores.entries()]
+      .sort((a, b) => b[1].score - a[1].score)
+      .slice(0, limit)
+      .map(([id]) => id)
+
+    const formattedResults: Array<{
+      listingId: string
+      title: string
+      description: string
+      price: number
+      category: string
+      snippet: string
+      score: number
+    }> = []
+
+    for (const listingId of topListingIds) {
+      const listing = await ctx.runQuery(api.listings.getById, {
+        id: listingId as Id<"listings">,
+      })
+
+      if (listing && listing.status === "active") {
+        const bestMatch = listingScores.get(listingId)
+        formattedResults.push({
+          listingId: listing._id,
+          title: listing.title,
+          description: listing.description,
+          price: listing.price,
+          category: listing.category,
+          snippet: bestMatch?.text ?? "",
+          score: bestMatch?.score ?? 0,
+        })
+      }
+    }
+
+    console.log(
+      `[RAG Search] Found ${formattedResults.length} products for query: "${args.query}"`,
+    )
+    return { results: formattedResults, text: text ?? "" }
+  },
+})
+
 // ============================================================================
 // Embedding Management
 // ============================================================================

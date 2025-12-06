@@ -18,6 +18,7 @@ export interface ListingData {
   favoriteCount?: number
   viewCount?: number
   status: "draft" | "active" | "sold" | "archived"
+  processingStatus?: "pending" | "processing" | "completed" | "failed"
 }
 
 interface ListingCardProps {
@@ -48,6 +49,9 @@ export function ListingCard({ listing, onPress, variant = "default" }: ListingCa
   // Determine card height based on variant for masonry effect
   const imageHeight = variant === "tall" ? 200 : variant === "short" ? 120 : 160
 
+  // Check if collage processing is still pending
+  const isProcessing = listing.processingStatus === "processing" || listing.processingStatus === "pending"
+
   return (
     <Pressable
       onPress={onPress}
@@ -65,6 +69,9 @@ export function ListingCard({ listing, onPress, variant = "default" }: ListingCa
             <Text text="📷" style={$placeholderEmoji} />
           </View>
         )}
+
+        {/* Dark overlay when collage processing is pending */}
+        {isProcessing && <View style={themed($processingOverlay)} />}
 
         {/* Status Badge */}
         {listing.status === "sold" && (
@@ -109,6 +116,7 @@ const $container: ThemedStyle<ViewStyle> = ({ colors, spacing }) => ({
   borderRadius: 12,
   overflow: "hidden",
   marginBottom: spacing.sm,
+  marginHorizontal: spacing.xs,
   shadowColor: colors.palette.neutral800,
   shadowOffset: { width: 0, height: 2 },
   shadowOpacity: 0.08,
@@ -136,6 +144,8 @@ const $placeholderImage: ThemedStyle<ViewStyle> = ({ colors }) => ({
 
 const $placeholderEmoji: TextStyle = {
   fontSize: 32,
+  lineHeight: 40,
+  includeFontPadding: false,
 }
 
 const $soldBadge: ThemedStyle<ViewStyle> = ({ colors, spacing }) => ({
@@ -167,6 +177,16 @@ const $favoriteBadge: ThemedStyle<ViewStyle> = ({ spacing }) => ({
 const $favoriteBadgeText: ThemedStyle<TextStyle> = () => ({
   color: "#FFFFFF",
   fontSize: 11,
+})
+
+const $processingOverlay: ThemedStyle<ViewStyle> = () => ({
+  position: "absolute",
+  top: 0,
+  left: 0,
+  right: 0,
+  bottom: 0,
+  backgroundColor: "rgba(0, 0, 0, 0.5)",
+  zIndex: 1,
 })
 
 const $content: ThemedStyle<ViewStyle> = ({ spacing }) => ({

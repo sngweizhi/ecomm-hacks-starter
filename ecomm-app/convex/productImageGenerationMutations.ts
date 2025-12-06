@@ -85,3 +85,49 @@ export const createDraftListing = internalMutation({
     return listingId
   },
 })
+
+/**
+ * Internal mutation to log AI listing creation audit records
+ */
+export const logAuditRecord = internalMutation({
+  args: {
+    userId: v.string(),
+    toolCallId: v.string(),
+    functionName: v.string(),
+    toolCallArgsJson: v.string(),
+    actionArgsSnapshot: v.object({
+      title: v.string(),
+      description: v.string(),
+      price: v.number(),
+      condition: v.string(),
+      brand: v.optional(v.string()),
+      category: v.string(),
+      imagePrompt: v.string(),
+    }),
+    finalImageUrl: v.optional(v.string()),
+    listingId: v.optional(v.id("listings")),
+    status: v.union(v.literal("success"), v.literal("failed")),
+    error: v.optional(v.string()),
+    modelName: v.string(),
+    durationMs: v.number(),
+  },
+  returns: v.id("aiListingAuditLogs"),
+  handler: async (ctx, args) => {
+    const auditLogId = await ctx.db.insert("aiListingAuditLogs", {
+      userId: args.userId,
+      toolCallId: args.toolCallId,
+      functionName: args.functionName,
+      toolCallArgsJson: args.toolCallArgsJson,
+      actionArgsSnapshot: args.actionArgsSnapshot,
+      finalImageUrl: args.finalImageUrl,
+      listingId: args.listingId,
+      status: args.status,
+      error: args.error,
+      modelName: args.modelName,
+      durationMs: args.durationMs,
+      createdAt: Date.now(),
+    })
+
+    return auditLogId
+  },
+})

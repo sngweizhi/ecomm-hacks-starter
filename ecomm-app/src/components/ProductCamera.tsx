@@ -8,11 +8,14 @@ import {
   useMicrophonePermission,
 } from "react-native-vision-camera"
 
-import type { Id } from "../../convex/_generated/dataModel"
+import type { AudioBarsStatus } from "@/components/AudioBars"
 import { Text } from "@/components/Text"
-import { useGeminiLive } from "@/hooks/useGeminiLive"
+import { useAudioPlayer } from "@/hooks/useAudioPlayer"
+import { useGeminiLive, type GeminiLiveStatus } from "@/hooks/useGeminiLive"
 import { usePcmAudioStream } from "@/hooks/usePcmAudioStream"
 import { showErrorToast } from "@/utils/toast"
+
+import type { Id } from "../../convex/_generated/dataModel"
 
 type ListingCreatedResult = {
   listingId: Id<"listings">
@@ -26,6 +29,11 @@ type ProductCameraProps = {
    */
   apiKey: string
   /**
+   * Whether to automatically start the Gemini Live connection when ready.
+   * Defaults to false - user must explicitly start the session.
+   */
+  autoStart?: boolean
+  /**
    * Callback when a listing is created - receives listing ID and title
    */
   onListingCreated?: (result: ListingCreatedResult) => void
@@ -33,6 +41,26 @@ type ProductCameraProps = {
    * Callback for text messages from Gemini (for displaying conversation)
    */
   onTextMessage?: (text: string) => void
+  /**
+   * Callback to get the stop function for stopping the stream
+   */
+  onStopRef?: (stopFn: () => void) => void
+  /**
+   * Callback to get the start function for starting the stream
+   */
+  onStartRef?: (startFn: () => Promise<void>) => void
+  /**
+   * Optional callback to surface audio visualization values to a parent
+   */
+  onAudioLevelsChange?: (data: {
+    inputLevel: number
+    outputLevel: number
+    status: AudioBarsStatus
+  }) => void
+  /**
+   * Optional callback when Gemini Live status changes
+   */
+  onStatusChange?: (status: GeminiLiveStatus) => void
 }
 
 /**
@@ -40,11 +68,23 @@ type ProductCameraProps = {
  * Gemini understands when users want to sell items and automatically
  * creates listings via function calling.
  */
-export function ProductCamera({ apiKey, onListingCreated, onTextMessage }: ProductCameraProps) {
-  console.log("[ProductCamera] Render - apiKey present:", !!apiKey)
-
+export function ProductCamera({
+  apiKey,
+  autoStart = false,
+  onListingCreated,
+  onTextMessage,
+  onStopRef,
+  onStartRef,
+  onAudioLevelsChange,
+  onStatusChange,
+}: ProductCameraProps) {
   const cameraRef = useRef<Camera>(null)
   const [isCapturing, setIsCapturing] = useState(false)
+  const [cameraError, setCameraError] = useState<string | null>(null)
+  const [micLevel, setMicLevel] = useState(0)
+  const [outputLevel, setOutputLevel] = useState(0)
+  // Track if component is mounted to prevent camera operations after unmount
+  const [isMounted, setIsMounted] = useState(true)
 
   const device = useCameraDevice("back")
   const { hasPermission: hasCameraPermission, requestPermission: requestCameraPermission } =
@@ -54,36 +94,108 @@ export function ProductCamera({ apiKey, onListingCreated, onTextMessage }: Produ
 
   // Memoize config to prevent effect re-runs on every render
   const geminiConfig = useMemo(() => ({ apiKey }), [apiKey])
+
+  // Track sample rate from audio chunks for logging (Gemini typically uses 24kHz)
+  const sampleRateRef = useRef<number | undefined>(undefined)
+
+  const { enqueue: playAudioChunk, interrupt: interruptAudio } = useAudioPlayer({
+    // Gemini Live API uses 24kHz by default (configured in geminiLive.ts)
+    sampleRate: 24000,
+    prebufferMs: 500,
+    minBufferMs: 0,
+    maxBufferMs: 4000,
+    onLevel: setOutputLevel,
+  })
+
   const geminiOptions = useMemo(
     () => ({
-      frameIntervalMs: 1000,
+      frameIntervalMs: 1400, // throttle frames to reduce model load/latency
+      audioIntervalMs: 300,
       onListingCreated: (result: ListingCreatedResult) => {
-        console.log("[ProductCamera] Listing created:", result)
-        // Note: Immediate toast is shown in useGeminiLive when function is called
-        // Just notify parent component to navigate
         onListingCreated?.(result)
       },
       onListingError: (error: string) => {
-        console.error("[ProductCamera] Listing error:", error)
         showErrorToast("Listing Failed", error)
       },
       onTextMessage: (text: string) => {
-        console.log("[ProductCamera] Text from Gemini:", text)
         onTextMessage?.(text)
       },
+      onAudioData: (base64Pcm: string, mimeType?: string, sampleRate?: number) => {
+        console.log("[ProductCamera] onAudioData called", {
+          base64Length: base64Pcm?.length || 0,
+          mimeType,
+          sampleRate,
+        })
+
+        // Track and log sample rate for debugging
+        if (sampleRate) {
+          if (!sampleRateRef.current) {
+            sampleRateRef.current = sampleRate
+            console.log("[ProductCamera] Detected sample rate:", sampleRate, "Hz")
+          } else if (sampleRate !== sampleRateRef.current) {
+            console.warn(
+              `[ProductCamera] Sample rate changed from ${sampleRateRef.current} to ${sampleRate} Hz (unexpected)`,
+            )
+          }
+        }
+
+        // Mark model as responding and pause mic input
+        if (!isModelRespondingRef.current) {
+          isModelRespondingRef.current = true
+          console.log("[ProductCamera] Model started responding, muting mic input")
+        }
+
+        if (!base64Pcm || base64Pcm.length === 0) {
+          console.warn("[ProductCamera] Empty audio chunk received, skipping playback")
+          return
+        }
+
+        // Log first few chunks to verify audio is being sent to player
+        if (!sampleRateRef.current || sampleRateRef.current === sampleRate) {
+          const isFirstChunk = !sampleRateRef.current
+          if (isFirstChunk) {
+            console.log("[ProductCamera] Sending first audio chunk to player", {
+              sizeBytes: base64Pcm.length,
+              sampleRate: sampleRate ?? "default (24000)",
+            })
+          }
+        }
+
+        playAudioChunk(base64Pcm)
+      },
+      onTurnComplete: () => {
+        // Resume mic input when model's turn is complete
+        isModelRespondingRef.current = false
+        console.log("[ProductCamera] Turn complete, resuming mic input")
+      },
+      onAudioInterrupted: () => {
+        // Resume mic input when model is interrupted so user can speak again
+        isModelRespondingRef.current = false
+        console.log("[ProductCamera] Audio interrupted (model signal), resuming mic input")
+      },
     }),
-    [onListingCreated, onTextMessage],
+    [interruptAudio, onListingCreated, onTextMessage, playAudioChunk],
   )
 
-  const { status, isProcessingListing, start, sendFrameBase64, sendPcmBase64 } = useGeminiLive(
+  const { status, start, stop, sendFrameBase64, sendPcmBase64 } = useGeminiLive(
     geminiConfig,
     geminiOptions,
   )
 
-  // Handle incoming PCM audio data - forward to Gemini
+  // Track if model is currently responding (to pause mic input and prevent false interruptions)
+  const isModelRespondingRef = useRef(false)
+  // Track if we've initiated connection to prevent duplicate start() calls
+  const hasStartedRef = useRef(false)
+  // Track if stop was explicitly requested by user (to prevent auto-restart)
+  const stopRequestedRef = useRef(false)
+
+  // Handle incoming PCM audio data - forward to Gemini only if model isn't responding
   const handlePcmData = useCallback(
     (base64Pcm: string) => {
-      sendPcmBase64(base64Pcm, 16000)
+      // Don't send mic audio while model is responding to prevent echo/feedback
+      if (!isModelRespondingRef.current) {
+        sendPcmBase64(base64Pcm, 16000)
+      }
     },
     [sendPcmBase64],
   )
@@ -93,41 +205,99 @@ export function ProductCamera({ apiKey, onListingCreated, onTextMessage }: Produ
     isStreaming: isRecordingAudio,
     start: startAudioStream,
     stop: stopAudioStream,
+    level: micLevelLive,
   } = usePcmAudioStream({
     onData: handlePcmData,
     onError: (error) => console.warn("PCM audio error:", error),
+    onLevel: setMicLevel,
   })
 
+  // Create combined stop function that stops both Gemini stream and audio
+  const handleStop = useCallback(() => {
+    stopRequestedRef.current = true // Mark that user explicitly stopped
+    stop() // Stop Gemini Live stream
+    stopAudioStream() // Stop audio capture
+    // Reset state for next connection
+    isModelRespondingRef.current = false
+  }, [stop, stopAudioStream])
+
+  // Expose stop function to parent via ref callback
   useEffect(() => {
-    requestCameraPermission()
-    requestMicPermission()
-  }, [requestCameraPermission, requestMicPermission])
+    if (onStopRef) {
+      onStopRef(handleStop)
+    }
+  }, [onStopRef, handleStop])
+
+  // Expose start function to parent via ref callback
+  useEffect(() => {
+    if (onStartRef) {
+      onStartRef(start)
+    }
+  }, [onStartRef, start])
 
   useEffect(() => {
-    console.log("[ProductCamera] start effect - device:", !!device, "permission:", hasCameraPermission)
-    if (!device || !hasCameraPermission) return
+    setIsMounted(true)
+    requestCameraPermission()
+    requestMicPermission()
+    return () => {
+      setIsMounted(false)
+    }
+  }, [requestCameraPermission, requestMicPermission])
+
+  // Auto-start connection when ready (only if autoStart is true)
+  useEffect(() => {
+    if (!autoStart) {
+      console.log("[ProductCamera] Auto-start disabled, waiting for manual start")
+      return
+    }
+    if (!device || !hasCameraPermission || status !== "idle" || hasStartedRef.current) {
+      return
+    }
+    // Don't auto-restart if user explicitly stopped the session
+    if (stopRequestedRef.current) {
+      console.log("[ProductCamera] Skipping auto-start (user stopped session)")
+      return
+    }
+
+    hasStartedRef.current = true
+    console.log("[ProductCamera] Auto-starting Gemini Live connection")
     start().catch((e) => {
-      console.log("[ProductCamera] start() rejected:", e)
+      console.error("[ProductCamera] start() rejected:", e)
+      hasStartedRef.current = false // Allow retry on error
     })
-  }, [device, hasCameraPermission, start])
+  }, [autoStart, device, hasCameraPermission, status, start])
+
+  // Cleanup on unmount to prevent camera leaks
+  useEffect(() => {
+    return () => {
+      setIsMounted(false)
+      hasStartedRef.current = false
+      isModelRespondingRef.current = false
+      stopRequestedRef.current = false
+      // Stop camera and audio streams on unmount
+      stopAudioStream()
+      stop()
+    }
+  }, [stop, stopAudioStream])
 
   // Periodically capture frames and send to Gemini at 1 FPS.
   useEffect(() => {
-    console.log(
-      "[ProductCamera] Frame capture effect - status:",
-      status,
-      "audioStreaming:",
-      isRecordingAudio,
-    )
-    if (!device || !hasCameraPermission || status !== "connected" || !isRecordingAudio) {
+    if (!device) {
       return
     }
-    console.log("[ProductCamera] Starting frame capture interval")
+    if (!hasCameraPermission) {
+      return
+    }
+    if (status !== "connected") {
+      return
+    }
+    if (!isRecordingAudio) {
+      return
+    }
     const interval = setInterval(() => {
       void captureAndSend()
-    }, 1000)
+    }, 500)
     return () => {
-      console.log("[ProductCamera] Clearing frame capture interval")
       clearInterval(interval)
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -142,22 +312,79 @@ export function ProductCamera({ apiKey, onListingCreated, onTextMessage }: Produ
     }
   }, [hasMicPermission, status, startAudioStream, stopAudioStream])
 
+  useEffect(() => {
+    if (status !== "connected") {
+      setMicLevel(0)
+      setOutputLevel(0)
+      // Reset responding state when connection is lost/error to allow mic input on reconnect
+      isModelRespondingRef.current = false
+    }
+  }, [status])
+
+  useEffect(() => {
+    if (micLevelLive !== undefined) {
+      setMicLevel(micLevelLive)
+    }
+  }, [micLevelLive])
+
+  // Notify parent of status changes
+  useEffect(() => {
+    onStatusChange?.(status)
+  }, [status, onStatusChange])
+
   const captureAndSend = async () => {
-    if (!cameraRef.current || isCapturing) return
+    if (!cameraRef.current) {
+      return
+    }
+    if (isCapturing) {
+      return
+    }
+
     setIsCapturing(true)
+    const captureStartedAt = Date.now()
     try {
-      // Use takeSnapshot() instead of takePhoto() - it captures from the preview
-      // buffer which is already in JPEG format, avoiding HEIC conversion issues
-      const snapshot = await cameraRef.current.takeSnapshot({
-        quality: 70,
-      })
+      let snapshot
+      try {
+        // Try takeSnapshot() first - it captures from the preview buffer
+        // which is already in JPEG format, avoiding HEIC conversion issues
+        snapshot = await cameraRef.current.takeSnapshot({
+          quality: 40, // further lower quality to shrink payload and reduce encode time
+        })
+      } catch (snapshotError: any) {
+        // Fallback to takePhoto() if takeSnapshot fails
+        console.warn(
+          "[ProductCamera] takeSnapshot failed, falling back to takePhoto:",
+          snapshotError?.message,
+        )
+        const photo = await cameraRef.current.takePhoto({
+          flash: "off",
+        })
+        snapshot = photo
+      }
+
       const path = snapshot.path.startsWith("file://") ? snapshot.path : `file://${snapshot.path}`
       const base64 = await FileSystem.readAsStringAsync(path, {
         encoding: "base64",
       })
+      const captureElapsed = Date.now() - captureStartedAt
+
+      // Cap overly large frames to avoid blocking model responses
+      const MAX_BASE64_SIZE = 140_000
+      if (base64.length > MAX_BASE64_SIZE) {
+        console.warn("[ProductCamera] Dropping frame: too large", {
+          sizeBytes: base64.length,
+          maxAllowed: MAX_BASE64_SIZE,
+        })
+        return
+      }
+
+      console.log("[ProductCamera] Frame captured", {
+        sizeBytes: base64.length,
+        elapsedMs: captureElapsed,
+      })
       sendFrameBase64(base64)
     } catch (error) {
-      console.warn("[ProductCamera] capture error:", error)
+      console.error("[ProductCamera] Capture error:", error)
     } finally {
       setIsCapturing(false)
     }
@@ -167,6 +394,32 @@ export function ProductCamera({ apiKey, onListingCreated, onTextMessage }: Produ
     () => !hasCameraPermission || !hasMicPermission,
     [hasCameraPermission, hasMicPermission],
   )
+
+  const statusLabel = useMemo(() => {
+    if (showPermissionsBlocker) return "Allow camera + mic"
+    if (cameraError) return "Camera error"
+    if (status === "connected") return "Listening..."
+    if (status === "connecting") return "Connecting..."
+    if (status === "error") return "Connection error"
+    return "Stopped"
+  }, [cameraError, showPermissionsBlocker, status])
+
+  const barsStatus: AudioBarsStatus = useMemo(() => {
+    if (status === "error") return "error"
+    if (status === "connecting") return "connecting"
+    if (status === "connected" && isRecordingAudio) {
+      return outputLevel > 0.05 ? "playing" : "listening"
+    }
+    return "idle"
+  }, [isRecordingAudio, outputLevel, status])
+
+  useEffect(() => {
+    onAudioLevelsChange?.({
+      inputLevel: micLevel,
+      outputLevel,
+      status: barsStatus,
+    })
+  }, [barsStatus, micLevel, onAudioLevelsChange, outputLevel])
 
   if (!device) {
     return (
@@ -183,12 +436,25 @@ export function ProductCamera({ apiKey, onListingCreated, onTextMessage }: Produ
           ref={cameraRef}
           style={StyleSheet.absoluteFill}
           device={device}
-          isActive={true}
+          isActive={isMounted && status === "connected"}
           photo={true}
-          video={true}
-          onError={(error) =>
-            console.log("[ProductCamera] Camera error:", error.code, error.message)
-          }
+          onError={(error) => {
+            // Some devices briefly emit `session/invalid-output-configuration`
+            // while VisionCamera retries with a compatible configuration.
+            // That error is transient and the camera still comes up, so we
+            // ignore it to avoid confusing logs/UI.
+            if (error.code === "session/invalid-output-configuration") {
+              return
+            }
+
+            // Ignore camera errors if component is unmounting
+            if (!isMounted) {
+              return
+            }
+
+            console.error("[ProductCamera] Camera error:", error.message)
+            setCameraError(error.message)
+          }}
         />
       ) : (
         <View style={styles.permissionPlaceholder}>
@@ -197,41 +463,27 @@ export function ProductCamera({ apiKey, onListingCreated, onTextMessage }: Produ
       )}
 
       <View style={styles.overlayContainer}>
-        {/* Processing indicator when creating listing */}
-        {isProcessingListing && (
-          <View style={styles.processingOverlay}>
-            <ActivityIndicator size="large" color="#fff" />
-            <Text text="Creating listing..." style={styles.processingText} />
+        {/* Connecting indicator */}
+        {status === "connecting" && (
+          <View style={styles.statusPill}>
+            <ActivityIndicator size="small" color="#0EA5E9" />
+            <Text text="Connecting..." style={styles.statusText} />
           </View>
         )}
 
-        {/* Status pill */}
-        <View style={styles.statusPill}>
-          {status === "connecting" && <ActivityIndicator size="small" color="#0EA5E9" />}
-          <Text
-            text={
-              showPermissionsBlocker
-                ? "Allow camera + mic"
-                : status === "connected"
-                  ? "Listening..."
-                  : "Connecting..."
-            }
-            style={styles.statusText}
-          />
-          {(isCapturing || isRecordingAudio) && (
-            <Text
-              text={` • ${isCapturing ? "video" : ""}${isCapturing && isRecordingAudio ? " +" : ""}${isRecordingAudio ? "audio" : ""}`}
-              style={styles.capturingText}
-            />
-          )}
-        </View>
+        {/* Permission required indicator */}
+        {showPermissionsBlocker && (
+          <View style={styles.statusPill}>
+            <Text text={statusLabel} style={styles.statusText} />
+          </View>
+        )}
 
-        {/* Instructions */}
-        {status === "connected" && !isProcessingListing && (
-          <View style={styles.instructionsPill}>
+        {/* Camera error message */}
+        {cameraError && (
+          <View style={styles.errorPill}>
             <Text
-              text="Point at an item and say 'I want to sell this' to create a listing"
-              style={styles.instructionsText}
+              text="Camera failed to start. Try closing and reopening this screen."
+              style={styles.errorText}
             />
           </View>
         )}
@@ -242,15 +494,25 @@ export function ProductCamera({ apiKey, onListingCreated, onTextMessage }: Produ
 
 /* eslint-disable react-native/no-color-literals */
 const styles = StyleSheet.create({
-  capturingText: {
-    color: "#a5f3fc",
-    fontSize: 12,
-  },
   container: {
     backgroundColor: "#000",
-    borderRadius: 16,
     flex: 1,
     overflow: "hidden",
+  },
+  errorPill: {
+    backgroundColor: "rgba(127,29,29,0.9)",
+    borderRadius: 12,
+    bottom: 70,
+    left: 16,
+    paddingHorizontal: 16,
+    paddingVertical: 8,
+    position: "absolute",
+    right: 16,
+  },
+  errorText: {
+    color: "#fee2e2",
+    fontSize: 13,
+    textAlign: "center",
   },
   fallback: {
     alignItems: "center",
@@ -262,23 +524,8 @@ const styles = StyleSheet.create({
   fallbackText: {
     color: "#e5e7eb",
   },
-  instructionsPill: {
-    alignSelf: "center",
-    backgroundColor: "rgba(0,0,0,0.7)",
-    borderRadius: 12,
-    marginBottom: 16,
-    marginHorizontal: 16,
-    paddingHorizontal: 16,
-    paddingVertical: 10,
-  },
-  instructionsText: {
-    color: "#fff",
-    fontSize: 13,
-    textAlign: "center",
-  },
   overlayContainer: {
     ...StyleSheet.absoluteFillObject,
-    justifyContent: "flex-end",
   },
   permissionPlaceholder: {
     ...StyleSheet.absoluteFillObject,
@@ -290,28 +537,17 @@ const styles = StyleSheet.create({
     color: "#e5e7eb",
     fontSize: 16,
   },
-  processingOverlay: {
-    ...StyleSheet.absoluteFillObject,
-    alignItems: "center",
-    backgroundColor: "rgba(0,0,0,0.7)",
-    justifyContent: "center",
-  },
-  processingText: {
-    color: "#fff",
-    fontSize: 16,
-    fontWeight: "600",
-    marginTop: 12,
-  },
   statusPill: {
     alignItems: "center",
-    alignSelf: "flex-start",
     backgroundColor: "rgba(0,0,0,0.55)",
     borderRadius: 16,
+    bottom: 16,
     flexDirection: "row",
     gap: 8,
-    margin: 12,
+    left: 16,
     paddingHorizontal: 12,
-    paddingVertical: 6,
+    paddingVertical: 8,
+    position: "absolute",
   },
   statusText: {
     color: "#fff",

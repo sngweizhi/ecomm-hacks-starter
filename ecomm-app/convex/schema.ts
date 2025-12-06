@@ -116,4 +116,33 @@ export default defineSchema({
   })
     .index("by_conversationId", ["conversationId"])
     .index("by_conversationId_and_createdAt", ["conversationId", "createdAt"]),
+
+  // AI Listing Audit Logs - tracks all AI-driven listing creation attempts
+  aiListingAuditLogs: defineTable({
+    userId: v.string(),
+    toolCallId: v.string(), // Gemini function call ID
+    functionName: v.string(), // e.g., "create_product_listing"
+    toolCallArgsJson: v.string(), // Full JSON string of the function call arguments
+    actionArgsSnapshot: v.object({
+      title: v.string(),
+      description: v.string(),
+      price: v.number(),
+      condition: v.string(),
+      brand: v.optional(v.string()),
+      category: v.string(),
+      imagePrompt: v.string(),
+    }),
+    finalImageUrl: v.optional(v.string()), // URL of the generated/edited image
+    listingId: v.optional(v.id("listings")), // Created listing ID if successful
+    status: v.union(v.literal("success"), v.literal("failed")),
+    error: v.optional(v.string()), // Error message if failed
+    modelName: v.string(), // e.g., "gemini-3-pro-image-preview"
+    durationMs: v.number(), // Time taken for the operation
+    createdAt: v.number(),
+  })
+    .index("by_createdAt", ["createdAt"])
+    .index("by_toolCallId", ["toolCallId"])
+    .index("by_userId", ["userId"])
+    .index("by_status", ["status"])
+    .index("by_userId_and_createdAt", ["userId", "createdAt"]),
 })

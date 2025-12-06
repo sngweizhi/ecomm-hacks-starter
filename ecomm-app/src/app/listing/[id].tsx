@@ -1,4 +1,4 @@
-import { useEffect, useCallback, useState } from "react"
+import { useEffect, useCallback, useState, useRef } from "react"
 import {
   View,
   ViewStyle,
@@ -9,15 +9,18 @@ import {
   ActivityIndicator,
   ImageStyle,
   Share,
-  Alert,
+  useWindowDimensions,
 } from "react-native"
 import { useLocalSearchParams, router } from "expo-router"
 import { useQuery, useMutation } from "convex/react"
+import { useSafeAreaInsets } from "react-native-safe-area-context"
+import Carousel from "react-native-reanimated-carousel"
 
 import { Button } from "@/components/Button"
 import { Icon } from "@/components/Icon"
 import { Screen } from "@/components/Screen"
 import { Text } from "@/components/Text"
+import { ActionSheet, type ActionSheetRef, type ActionSheetConfig } from "@/components/ActionSheet"
 import { useAuth } from "@/context/AuthContext"
 import { useAppTheme } from "@/theme/context"
 import type { ThemedStyle } from "@/theme/types"
@@ -29,7 +32,12 @@ export default function ListingDetailScreen() {
   const { id } = useLocalSearchParams<{ id: string }>()
   const { themed, theme } = useAppTheme()
   const { userId, isAuthenticated } = useAuth()
+  const actionSheetRef = useRef<ActionSheetRef>(null)
+  const insets = useSafeAreaInsets()
   const [isContacting, setIsContacting] = useState(false)
+  const [isDeleting, setIsDeleting] = useState(false)
+  const [currentImageIndex, setCurrentImageIndex] = useState(0)
+  const { width } = useWindowDimensions()
 
   // Fetch listing data from Convex
   const listing = useQuery(api.listings.getById, { id: id as Id<"listings"> })
@@ -39,6 +47,12 @@ export default function ListingDetailScreen() {
   const toggleFavorite = useMutation(api.listings.toggleFavorite)
   const incrementViewCount = useMutation(api.listings.incrementViewCount)
   const getOrCreateConversation = useMutation(api.conversations.getOrCreate)
+  const deleteListing = useMutation(api.listings.deleteListing)
+
+  const showSheet = useCallback(
+    (sheetConfig: ActionSheetConfig) => actionSheetRef.current?.present(sheetConfig),
+    [],
+  )
 
   // Increment view count on mount
   useEffect(() => {
@@ -54,17 +68,25 @@ export default function ListingDetailScreen() {
   const handleContactSeller = useCallback(async () => {
     if (!listing || !isAuthenticated) {
       if (!isAuthenticated) {
-        Alert.alert("Sign In Required", "Please sign in to contact the seller.", [
-          { text: "Cancel", style: "cancel" },
-          { text: "Sign In", onPress: () => router.push("/sign-in") },
-        ])
+        showSheet({
+          title: "Sign In Required",
+          message: "Please sign in to contact the seller.",
+          actions: [
+            { text: "Cancel", style: "cancel" },
+            { text: "Sign In", style: "primary", onPress: () => router.push("/sign-in") },
+          ],
+        })
       }
       return
     }
 
     // Check if this is the user's own listing
     if (listing.ownerId === userId) {
-      Alert.alert("Your Listing", "You can't message yourself about your own listing.")
+      showSheet({
+        title: "Your Listing",
+        message: "You can't message yourself about your own listing.",
+        actions: [{ text: "Got it", style: "primary" }],
+      })
       return
     }
 
@@ -75,11 +97,15 @@ export default function ListingDetailScreen() {
       })
       router.push(`/messages/${conversationId}`)
     } catch {
-      Alert.alert("Error", "Failed to start conversation. Please try again.")
+      showSheet({
+        title: "Error",
+        message: "Failed to start conversation. Please try again.",
+        actions: [{ text: "Dismiss", style: "primary" }],
+      })
     } finally {
       setIsContacting(false)
     }
-  }, [listing, isAuthenticated, userId, id, getOrCreateConversation])
+  }, [listing, isAuthenticated, userId, id, getOrCreateConversation, showSheet])
 
   const handleFavorite = useCallback(async () => {
     if (!id) return
@@ -89,6 +115,42 @@ export default function ListingDetailScreen() {
       console.error("Failed to toggle favorite:", error)
     }
   }, [id, toggleFavorite])
+
+  const handleDeleteListing = useCallback(async () => {
+    if (!listing || isDeleting) return
+    setIsDeleting(true)
+    try {
+      await deleteListing({ id: listing._id })
+      showSheet({
+        title: "Listing deleted",
+        message: "Your listing was removed.",
+        actions: [
+          { text: "OK", style: "primary", onPress: () => router.replace("/me/listings") },
+        ],
+      })
+    } catch (error) {
+      console.error("Failed to delete listing:", error)
+      showSheet({
+        title: "Error",
+        message: "Failed to delete listing. Please try again.",
+        actions: [{ text: "Dismiss", style: "primary" }],
+      })
+    } finally {
+      setIsDeleting(false)
+    }
+  }, [deleteListing, isDeleting, listing, showSheet, router])
+
+  const handleMoreOptions = useCallback(() => {
+    if (!listing || listing.ownerId !== userId || isDeleting) return
+    showSheet({
+      title: "Listing options",
+      message: "Manage this listing.",
+      actions: [
+        { text: "Cancel", style: "cancel" },
+        { text: "Delete listing", style: "destructive", onPress: () => handleDeleteListing() },
+      ],
+    })
+  }, [handleDeleteListing, isDeleting, listing, userId])
 
   const handleShare = useCallback(async () => {
     if (!listing) return
@@ -119,8 +181,14 @@ export default function ListingDetailScreen() {
       .join(" ")
   }
 
-  // Get image URL
-  const imageUrl = listing?.thumbnailUrl || listing?.imageUrls?.[0]
+  // Get all image URLs
+  const imageUrls = listing?.imageUrls && listing.imageUrls.length > 0
+    ? listing.imageUrls
+    : listing?.thumbnailUrl
+      ? [listing.thumbnailUrl]
+      : []
+  
+  const hasMultipleImages = imageUrls.length > 1
 
   // Loading state
   if (listing === undefined) {
@@ -164,6 +232,11 @@ export default function ListingDetailScreen() {
           <Pressable onPress={handleFavorite} style={themed($headerAction)}>
             <Text text={isFavorited ? "❤️" : "🤍"} style={$favoriteIcon} />
           </Pressable>
+          {listing.ownerId === userId && (
+            <Pressable onPress={handleMoreOptions} style={themed($headerAction)}>
+              <Icon icon="moreVertical" size={24} color={theme.colors.text} />
+            </Pressable>
+          )}
         </View>
       </View>
 
@@ -174,8 +247,39 @@ export default function ListingDetailScreen() {
       >
         {/* Video/Image */}
         <View style={themed($mediaContainer)}>
-          {imageUrl ? (
-            <Image source={{ uri: imageUrl }} style={$mediaImage} resizeMode="cover" />
+          {imageUrls.length > 0 ? (
+            <>
+              {hasMultipleImages ? (
+                <>
+                  <Carousel
+                    data={imageUrls}
+                    width={width}
+                    height={width}
+                    pagingEnabled
+                    loop={false}
+                    snapEnabled
+                    onSnapToItem={setCurrentImageIndex}
+                    renderItem={({ item }) => (
+                      <Image source={{ uri: item }} style={$mediaImage} resizeMode="cover" />
+                    )}
+                  />
+                  {/* Page indicators */}
+                  <View style={themed($pageIndicatorContainer)}>
+                    {imageUrls.map((_, index) => (
+                      <View
+                        key={index}
+                        style={[
+                          themed($pageIndicator),
+                          index === currentImageIndex && themed($pageIndicatorActive),
+                        ]}
+                      />
+                    ))}
+                  </View>
+                </>
+              ) : (
+                <Image source={{ uri: imageUrls[0] }} style={$mediaImage} resizeMode="cover" />
+              )}
+            </>
           ) : (
             <View style={themed($mediaPlaceholder)}>
               <Icon icon="image" size={48} color={theme.colors.textDim} />
@@ -234,7 +338,7 @@ export default function ListingDetailScreen() {
       </ScrollView>
 
       {/* Bottom CTA */}
-      <View style={themed($bottomCta)}>
+      <View style={[themed($bottomCta), { paddingBottom: Math.max(insets.bottom, 16) }]}>
         <Button
           text={
             listing.status === "sold"
@@ -251,6 +355,7 @@ export default function ListingDetailScreen() {
           disabled={listing.status === "sold" || listing.ownerId === userId || isContacting}
         />
       </View>
+      <ActionSheet ref={actionSheetRef} />
     </Screen>
   )
 }
@@ -268,7 +373,9 @@ const $loadingContainer: ThemedStyle<ViewStyle> = () => ({
 
 const $notFoundEmoji: TextStyle = {
   fontSize: 48,
+  lineHeight: 56,
   marginBottom: 16,
+  includeFontPadding: false,
 }
 
 const $notFoundText: ThemedStyle<TextStyle> = ({ colors }) => ({
@@ -372,6 +479,32 @@ const $soldOverlayText: ThemedStyle<TextStyle> = () => ({
   color: "#FFFFFF",
   fontSize: 32,
   fontWeight: "bold",
+})
+
+const $pageIndicatorContainer: ThemedStyle<ViewStyle> = ({ spacing }) => ({
+  position: "absolute",
+  bottom: spacing.md,
+  left: 0,
+  right: 0,
+  flexDirection: "row",
+  justifyContent: "center",
+  alignItems: "center",
+  gap: spacing.xs,
+  zIndex: 5,
+})
+
+const $pageIndicator: ThemedStyle<ViewStyle> = () => ({
+  width: 6,
+  height: 6,
+  borderRadius: 3,
+  backgroundColor: "rgba(255, 255, 255, 0.5)",
+})
+
+const $pageIndicatorActive: ThemedStyle<ViewStyle> = () => ({
+  backgroundColor: "rgba(255, 255, 255, 1)",
+  width: 20,
+  height: 6,
+  borderRadius: 3,
 })
 
 const $infoContainer: ThemedStyle<ViewStyle> = ({ spacing }) => ({
@@ -479,7 +612,8 @@ const $sellerMeta: ThemedStyle<TextStyle> = ({ colors }) => ({
 })
 
 const $bottomCta: ThemedStyle<ViewStyle> = ({ colors, spacing }) => ({
-  padding: spacing.md,
+  paddingHorizontal: spacing.md,
+  paddingTop: spacing.md,
   backgroundColor: colors.background,
   borderTopWidth: 1,
   borderTopColor: colors.separator,

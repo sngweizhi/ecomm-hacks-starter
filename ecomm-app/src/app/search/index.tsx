@@ -1,4 +1,4 @@
-import { useState, useCallback, useMemo, useEffect } from "react"
+import { useState, useCallback, useMemo, useEffect, useRef } from "react"
 import {
   View,
   ViewStyle,
@@ -9,9 +9,7 @@ import {
   // eslint-disable-next-line no-restricted-imports
   TextInput,
   Dimensions,
-  Modal,
   ScrollView,
-  StyleSheet,
 } from "react-native"
 import { router } from "expo-router"
 import { useQuery } from "convex/react"
@@ -20,6 +18,7 @@ import { Icon } from "@/components/Icon"
 import { ListingCard, ListingData } from "@/components/ListingCard"
 import { Screen } from "@/components/Screen"
 import { Text } from "@/components/Text"
+import { SelectionSheet, type SelectionSheetRef, type SelectionSheetConfig } from "@/components/SelectionSheet"
 import { useDebouncedValue } from "@/hooks/useDebouncedValue"
 import { useAppTheme } from "@/theme/context"
 import type { ThemedStyle } from "@/theme/types"
@@ -48,6 +47,11 @@ const COLUMN_WIDTH = (SCREEN_WIDTH - HORIZONTAL_PADDING * 2 - COLUMN_GAP) / 2
 
 export default function SearchScreen() {
   const { themed, theme } = useAppTheme()
+  const selectionSheetRef = useRef<SelectionSheetRef>(null)
+  const openSelectionSheet = useCallback(
+    (config: SelectionSheetConfig) => selectionSheetRef.current?.present(config),
+    [],
+  )
 
   // Search state
   const [searchText, setSearchText] = useState("")
@@ -57,11 +61,6 @@ export default function SearchScreen() {
   const [sortBy, setSortBy] = useState<SortOption>("relevance")
   const [categoryFilter, setCategoryFilter] = useState<CategoryFilter>(null)
   const [campusFilter, setCampusFilter] = useState<CampusFilter>(null)
-
-  // Modal state
-  const [showSortModal, setShowSortModal] = useState(false)
-  const [showCategoryModal, setShowCategoryModal] = useState(false)
-  const [showCampusModal, setShowCampusModal] = useState(false)
 
   // Recent searches
   const [recentSearches, setRecentSearches] = useState<string[]>([])
@@ -242,7 +241,17 @@ export default function SearchScreen() {
       contentContainerStyle={themed($filterContainer)}
     >
       {/* Sort Filter */}
-      <Pressable style={themed($filterChip)} onPress={() => setShowSortModal(true)}>
+      <Pressable
+        style={themed($filterChip)}
+        onPress={() =>
+          openSelectionSheet({
+            title: "Sort By",
+            options: SORT_OPTIONS.map((option) => ({ value: option.value, label: option.label })),
+            selectedValue: sortBy,
+            onSelect: (value) => setSortBy((value as SortOption) || "relevance"),
+          })
+        }
+      >
         <Text
           text={SORT_OPTIONS.find((o) => o.value === sortBy)?.label ?? "Sort"}
           style={themed($filterChipText)}
@@ -259,7 +268,17 @@ export default function SearchScreen() {
       {/* Category Filter */}
       <Pressable
         style={[themed($filterChip), categoryFilter && themed($filterChipActive)]}
-        onPress={() => setShowCategoryModal(true)}
+        onPress={() =>
+          openSelectionSheet({
+            title: "Category",
+            options: [
+              { value: null, label: "All Categories" },
+              ...(categories?.map((c) => ({ value: c.slug, label: c.name })) ?? []),
+            ],
+            selectedValue: categoryFilter,
+            onSelect: (value) => setCategoryFilter((value as CategoryFilter) ?? null),
+          })
+        }
       >
         <Text
           text={
@@ -282,7 +301,17 @@ export default function SearchScreen() {
       {availableCampuses.length > 0 && (
         <Pressable
           style={[themed($filterChip), campusFilter && themed($filterChipActive)]}
-          onPress={() => setShowCampusModal(true)}
+          onPress={() =>
+            openSelectionSheet({
+              title: "Campus",
+              options: [
+                { value: null, label: "All Campuses" },
+                ...availableCampuses.map((campus) => ({ value: campus, label: campus })),
+              ],
+              selectedValue: campusFilter,
+              onSelect: (value) => setCampusFilter((value as CampusFilter) ?? null),
+            })
+          }
         >
           <Text
             text={campusFilter ?? "Campus"}
@@ -393,151 +422,7 @@ export default function SearchScreen() {
       ) : (
         renderRecentSearches()
       )}
-
-      {/* Sort Modal */}
-      <Modal
-        visible={showSortModal}
-        transparent
-        animationType="fade"
-        onRequestClose={() => setShowSortModal(false)}
-      >
-        <Pressable style={themed($modalOverlay)} onPress={() => setShowSortModal(false)}>
-          <View style={themed($modalContent)}>
-            <Text text="Sort By" preset="subheading" style={themed($modalTitle)} />
-            {SORT_OPTIONS.map((option) => (
-              <Pressable
-                key={option.value}
-                style={[
-                  themed($modalOption),
-                  sortBy === option.value && themed($modalOptionActive),
-                ]}
-                onPress={() => {
-                  setSortBy(option.value)
-                  setShowSortModal(false)
-                }}
-              >
-                <Text
-                  text={option.label}
-                  style={[
-                    themed($modalOptionText),
-                    sortBy === option.value && themed($modalOptionTextActive),
-                  ]}
-                />
-                {sortBy === option.value && (
-                  <Icon icon="check" size={20} color={theme.colors.tint} />
-                )}
-              </Pressable>
-            ))}
-          </View>
-        </Pressable>
-      </Modal>
-
-      {/* Category Modal */}
-      <Modal
-        visible={showCategoryModal}
-        transparent
-        animationType="fade"
-        onRequestClose={() => setShowCategoryModal(false)}
-      >
-        <Pressable style={themed($modalOverlay)} onPress={() => setShowCategoryModal(false)}>
-          <View style={themed($modalContent)}>
-            <Text text="Filter by Category" preset="subheading" style={themed($modalTitle)} />
-            <ScrollView style={styles.modalScrollView}>
-              <Pressable
-                style={[themed($modalOption), !categoryFilter && themed($modalOptionActive)]}
-                onPress={() => {
-                  setCategoryFilter(null)
-                  setShowCategoryModal(false)
-                }}
-              >
-                <Text
-                  text="All Categories"
-                  style={[
-                    themed($modalOptionText),
-                    !categoryFilter && themed($modalOptionTextActive),
-                  ]}
-                />
-                {!categoryFilter && <Icon icon="check" size={20} color={theme.colors.tint} />}
-              </Pressable>
-              {categories?.map((category) => (
-                <Pressable
-                  key={category._id}
-                  style={[
-                    themed($modalOption),
-                    categoryFilter === category.slug && themed($modalOptionActive),
-                  ]}
-                  onPress={() => {
-                    setCategoryFilter(category.slug)
-                    setShowCategoryModal(false)
-                  }}
-                >
-                  <Text
-                    text={category.name}
-                    style={[
-                      themed($modalOptionText),
-                      categoryFilter === category.slug && themed($modalOptionTextActive),
-                    ]}
-                  />
-                  {categoryFilter === category.slug && (
-                    <Icon icon="check" size={20} color={theme.colors.tint} />
-                  )}
-                </Pressable>
-              ))}
-            </ScrollView>
-          </View>
-        </Pressable>
-      </Modal>
-
-      {/* Campus Modal */}
-      <Modal
-        visible={showCampusModal}
-        transparent
-        animationType="fade"
-        onRequestClose={() => setShowCampusModal(false)}
-      >
-        <Pressable style={themed($modalOverlay)} onPress={() => setShowCampusModal(false)}>
-          <View style={themed($modalContent)}>
-            <Text text="Filter by Campus" preset="subheading" style={themed($modalTitle)} />
-            <Pressable
-              style={[themed($modalOption), !campusFilter && themed($modalOptionActive)]}
-              onPress={() => {
-                setCampusFilter(null)
-                setShowCampusModal(false)
-              }}
-            >
-              <Text
-                text="All Campuses"
-                style={[themed($modalOptionText), !campusFilter && themed($modalOptionTextActive)]}
-              />
-              {!campusFilter && <Icon icon="check" size={20} color={theme.colors.tint} />}
-            </Pressable>
-            {availableCampuses.map((campus) => (
-              <Pressable
-                key={campus}
-                style={[
-                  themed($modalOption),
-                  campusFilter === campus && themed($modalOptionActive),
-                ]}
-                onPress={() => {
-                  setCampusFilter(campus)
-                  setShowCampusModal(false)
-                }}
-              >
-                <Text
-                  text={campus}
-                  style={[
-                    themed($modalOptionText),
-                    campusFilter === campus && themed($modalOptionTextActive),
-                  ]}
-                />
-                {campusFilter === campus && (
-                  <Icon icon="check" size={20} color={theme.colors.tint} />
-                )}
-              </Pressable>
-            ))}
-          </View>
-        </Pressable>
-      </Modal>
+      <SelectionSheet ref={selectionSheetRef} />
     </Screen>
   )
 }
@@ -690,7 +575,9 @@ const $emptyContainer: ThemedStyle<ViewStyle> = ({ spacing }) => ({
 
 const $emptyEmoji: TextStyle = {
   fontSize: 48,
+  lineHeight: 56,
   marginBottom: 16,
+  includeFontPadding: false,
 }
 
 const $emptyText: ThemedStyle<TextStyle> = ({ colors, spacing }) => ({
@@ -703,57 +590,4 @@ const $emptySubtext: ThemedStyle<TextStyle> = ({ colors }) => ({
   color: colors.textDim,
   textAlign: "center",
   marginTop: 8,
-})
-
-// Modal Styles
-const $modalOverlay: ThemedStyle<ViewStyle> = ({ colors }) => ({
-  flex: 1,
-  backgroundColor: colors.palette.overlay50,
-  justifyContent: "center",
-  alignItems: "center",
-  padding: 24,
-})
-
-const $modalContent: ThemedStyle<ViewStyle> = ({ colors, spacing }) => ({
-  backgroundColor: colors.palette.neutral100,
-  borderRadius: 16,
-  padding: spacing.md,
-  width: "100%",
-  maxWidth: 320,
-})
-
-const $modalTitle: ThemedStyle<TextStyle> = ({ colors, spacing }) => ({
-  color: colors.text,
-  marginBottom: spacing.sm,
-  textAlign: "center",
-})
-
-const $modalOption: ThemedStyle<ViewStyle> = ({ spacing }) => ({
-  flexDirection: "row",
-  alignItems: "center",
-  justifyContent: "space-between",
-  paddingVertical: spacing.sm,
-  paddingHorizontal: spacing.sm,
-  borderRadius: 8,
-  marginBottom: spacing.xxs,
-})
-
-const $modalOptionActive: ThemedStyle<ViewStyle> = ({ colors }) => ({
-  backgroundColor: colors.palette.primary100,
-})
-
-const $modalOptionText: ThemedStyle<TextStyle> = ({ colors }) => ({
-  color: colors.text,
-  fontSize: 16,
-})
-
-const $modalOptionTextActive: ThemedStyle<TextStyle> = ({ colors }) => ({
-  color: colors.tint,
-  fontWeight: "600",
-})
-
-const styles = StyleSheet.create({
-  modalScrollView: {
-    maxHeight: 400,
-  },
 })

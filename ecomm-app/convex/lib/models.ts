@@ -15,12 +15,12 @@ export const CHAT_AGENT_MODEL = "gemini-2.0-flash"
 
 /**
  * Model for embeddings - used for product search
- * Note: gemini-embedding-001 supports AI SDK 5's v2 specification
+ * Note: text-embedding-004 is an AI SDK 5-compatible v2 model
  */
-export const EMBEDDING_MODEL = "gemini-embedding-001"
+export const EMBEDDING_MODEL = "text-embedding-004"
 
 /**
  * Embedding dimension for the model
- * Note: gemini-embedding-001 uses 3072 dimensions (state-of-the-art quality)
+ * Note: text-embedding-004 outputs 768-dimension vectors
  */
-export const EMBEDDING_DIMENSION = 3072
+export const EMBEDDING_DIMENSION = 768

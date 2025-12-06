@@ -1,4 +1,4 @@
-import { useState, useCallback, useMemo } from "react"
+import { useState, useCallback, useMemo, useRef } from "react"
 import {
   View,
   ViewStyle,
@@ -7,12 +7,11 @@ import {
   // eslint-disable-next-line no-restricted-imports
   TextInput,
   Pressable,
-  FlatList,
   ActivityIndicator,
   RefreshControl,
-  Dimensions,
   StyleSheet,
 } from "react-native"
+import { FlashList } from "@shopify/flash-list"
 import { useRouter } from "expo-router"
 import { useQuery } from "convex/react"
 import { Robot } from "phosphor-react-native"
@@ -20,32 +19,81 @@ import { Robot } from "phosphor-react-native"
 import { ListingCard, ListingData } from "@/components/ListingCard"
 import { Screen } from "@/components/Screen"
 import { Text } from "@/components/Text"
+import { Icon } from "@/components/Icon"
+import { SelectionSheet, SelectionSheetRef } from "@/components/SelectionSheet"
 import { useAppTheme } from "@/theme/context"
 import type { ThemedStyle } from "@/theme/types"
 
 import { api } from "../../../convex/_generated/api"
 
-const SCREEN_WIDTH = Dimensions.get("window").width
-const COLUMN_GAP = 12
-const HORIZONTAL_PADDING = 16
-const COLUMN_WIDTH = (SCREEN_WIDTH - HORIZONTAL_PADDING * 2 - COLUMN_GAP) / 2
+type PriceFilter = "all" | "free" | "under25" | "25to50" | "50to100" | "100plus"
+type SortOption = "newest" | "price_low" | "price_high"
 
 export default function HomeScreen() {
   const { themed, theme } = useAppTheme()
   const router = useRouter()
 
-  // State for category filter
+  // State for filters
   const [selectedCategory, setSelectedCategory] = useState<string | null>(null)
+  const [priceFilter, setPriceFilter] = useState<PriceFilter>("all")
+  const [sortBy, setSortBy] = useState<SortOption>("newest")
   const [refreshing, setRefreshing] = useState(false)
+
+  // Refs for selection sheets
+  const categorySheetRef = useRef<SelectionSheetRef>(null)
+  const priceSheetRef = useRef<SelectionSheetRef>(null)
+  const sortSheetRef = useRef<SelectionSheetRef>(null)
 
   // Fetch categories from Convex
   const categories = useQuery(api.categories.list)
 
   // Fetch listings from Convex with optional category filter
-  const listings = useQuery(api.listings.listForFeed, {
+  const rawListings = useQuery(api.listings.listForFeed, {
     category: selectedCategory ?? undefined,
     limit: 50,
   })
+
+  // Filter and sort listings client-side
+  const listings = useMemo(() => {
+    if (!rawListings) return undefined
+
+    let filtered = [...rawListings]
+
+    // Apply price filter
+    if (priceFilter !== "all") {
+      filtered = filtered.filter((listing) => {
+        switch (priceFilter) {
+          case "free":
+            return listing.price === 0
+          case "under25":
+            return listing.price > 0 && listing.price < 25
+          case "25to50":
+            return listing.price >= 25 && listing.price < 50
+          case "50to100":
+            return listing.price >= 50 && listing.price < 100
+          case "100plus":
+            return listing.price >= 100
+          default:
+            return true
+        }
+      })
+    }
+
+    // Apply sort
+    switch (sortBy) {
+      case "newest":
+        filtered.sort((a, b) => b.createdAt - a.createdAt)
+        break
+      case "price_low":
+        filtered.sort((a, b) => a.price - b.price)
+        break
+      case "price_high":
+        filtered.sort((a, b) => b.price - a.price)
+        break
+    }
+
+    return filtered
+  }, [rawListings, priceFilter, sortBy])
 
   // Handle refresh
   const onRefresh = useCallback(() => {
@@ -62,9 +110,19 @@ export default function HomeScreen() {
     [router],
   )
 
-  // Handle category press
-  const handleCategoryPress = useCallback((categorySlug: string | null) => {
-    setSelectedCategory((prev) => (prev === categorySlug ? null : categorySlug))
+  // Handle category selection
+  const handleCategorySelect = useCallback((value: string | null) => {
+    setSelectedCategory(value)
+  }, [])
+
+  // Handle price filter selection
+  const handlePriceFilterSelect = useCallback((value: string | null) => {
+    setPriceFilter((value as PriceFilter) || "all")
+  }, [])
+
+  // Handle sort selection
+  const handleSortSelect = useCallback((value: string | null) => {
+    setSortBy((value as SortOption) || "newest")
   }, [])
 
   // Create category list with "All" option
@@ -73,6 +131,57 @@ export default function HomeScreen() {
     if (!categories) return [allOption]
     return [allOption, ...categories.map((c) => ({ slug: c.slug, name: c.name }))]
   }, [categories])
+
+  // Price filter options
+  const priceFilters: { value: PriceFilter; label: string }[] = [
+    { value: "all", label: "All Prices" },
+    { value: "free", label: "Free" },
+    { value: "under25", label: "Under $25" },
+    { value: "25to50", label: "$25-$50" },
+    { value: "50to100", label: "$50-$100" },
+    { value: "100plus", label: "$100+" },
+  ]
+
+  // Sort options
+  const sortOptions: { value: SortOption; label: string }[] = [
+    { value: "newest", label: "Newest" },
+    { value: "price_low", label: "Price: Low" },
+    { value: "price_high", label: "Price: High" },
+  ]
+
+  // Open category sheet
+  const openCategorySheet = useCallback(() => {
+    const options = categoryList.map((cat) => ({
+      value: cat.slug,
+      label: cat.name,
+    }))
+    categorySheetRef.current?.present({
+      title: "Category",
+      options,
+      selectedValue: selectedCategory,
+      onSelect: handleCategorySelect,
+    })
+  }, [categoryList, selectedCategory, handleCategorySelect])
+
+  // Open price filter sheet
+  const openPriceSheet = useCallback(() => {
+    priceSheetRef.current?.present({
+      title: "Price Range",
+      options: priceFilters.map((f) => ({ value: f.value, label: f.label })),
+      selectedValue: priceFilter,
+      onSelect: handlePriceFilterSelect,
+    })
+  }, [priceFilter, handlePriceFilterSelect])
+
+  // Open sort sheet
+  const openSortSheet = useCallback(() => {
+    sortSheetRef.current?.present({
+      title: "Sort By",
+      options: sortOptions.map((s) => ({ value: s.value, label: s.label })),
+      selectedValue: sortBy,
+      onSelect: handleSortSelect,
+    })
+  }, [sortBy, handleSortSelect])
 
   // Determine variant for masonry-like effect (alternating heights)
   const getVariant = useCallback((index: number): "default" | "tall" | "short" => {
@@ -86,18 +195,32 @@ export default function HomeScreen() {
   // Render a single listing card
   const renderListingCard = useCallback(
     ({ item, index }: { item: ListingData; index: number }) => (
-      <View style={{ width: COLUMN_WIDTH }}>
-        <ListingCard
-          listing={item}
-          variant={getVariant(index)}
-          onPress={() => handleListingPress(item._id)}
-        />
-      </View>
+      <ListingCard
+        listing={item}
+        variant={getVariant(index)}
+        onPress={() => handleListingPress(item._id)}
+      />
     ),
     [getVariant, handleListingPress],
   )
 
-  // Render header (search + categories)
+  // Get current filter labels
+  const currentCategoryLabel = useMemo(() => {
+    const category = categoryList.find((c) => c.slug === selectedCategory)
+    return category?.name || "All Categories"
+  }, [categoryList, selectedCategory])
+
+  const currentPriceLabel = useMemo(() => {
+    const filter = priceFilters.find((f) => f.value === priceFilter)
+    return filter?.label || "All Prices"
+  }, [priceFilter])
+
+  const currentSortLabel = useMemo(() => {
+    const option = sortOptions.find((s) => s.value === sortBy)
+    return option?.label || "Newest"
+  }, [sortBy])
+
+  // Render header (search + filters)
   const renderHeader = () => (
     <View>
       {/* Search Bar */}
@@ -110,27 +233,92 @@ export default function HomeScreen() {
         />
       </View>
 
-      {/* Category Pills */}
+      {/* Single Row Filter Bar */}
       <ScrollView
         horizontal
         showsHorizontalScrollIndicator={false}
-        contentContainerStyle={themed($categoriesContainer)}
+        contentContainerStyle={themed($filterRow)}
       >
-        {categoryList.map((category) => {
-          const isActive = selectedCategory === category.slug
-          return (
-            <Pressable
-              key={category.slug ?? "all"}
-              style={[themed($categoryPill), isActive && themed($categoryPillActive)]}
-              onPress={() => handleCategoryPress(category.slug)}
-            >
-              <Text
-                text={category.name}
-                style={[themed($categoryText), isActive && themed($categoryTextActive)]}
-              />
-            </Pressable>
-          )
-        })}
+        {/* Category Filter */}
+        <Pressable
+          style={[
+            themed($filterTrigger),
+            selectedCategory !== null && themed($filterTriggerActive),
+          ]}
+          onPress={openCategorySheet}
+        >
+          <Text
+            text={currentCategoryLabel}
+            style={[
+              themed($filterTriggerText),
+              selectedCategory !== null && themed($filterTriggerTextActive),
+            ]}
+          />
+          <Icon
+            icon="caretRight"
+            size={14}
+            color={
+              selectedCategory !== null
+                ? theme.colors.palette.neutral100
+                : theme.colors.textDim
+            }
+            style={themed($filterTriggerIcon)}
+          />
+        </Pressable>
+
+        {/* Price Filter */}
+        <Pressable
+          style={[
+            themed($filterTrigger),
+            priceFilter !== "all" && themed($filterTriggerActive),
+          ]}
+          onPress={openPriceSheet}
+        >
+          <Text
+            text={currentPriceLabel}
+            style={[
+              themed($filterTriggerText),
+              priceFilter !== "all" && themed($filterTriggerTextActive),
+            ]}
+          />
+          <Icon
+            icon="caretRight"
+            size={14}
+            color={
+              priceFilter !== "all"
+                ? theme.colors.palette.neutral100
+                : theme.colors.textDim
+            }
+            style={themed($filterTriggerIcon)}
+          />
+        </Pressable>
+
+        {/* Sort Filter */}
+        <Pressable
+          style={[
+            themed($filterTrigger),
+            sortBy !== "newest" && themed($filterTriggerActive),
+          ]}
+          onPress={openSortSheet}
+        >
+          <Text
+            text={currentSortLabel}
+            style={[
+              themed($filterTriggerText),
+              sortBy !== "newest" && themed($filterTriggerTextActive),
+            ]}
+          />
+          <Icon
+            icon="caretRight"
+            size={14}
+            color={
+              sortBy !== "newest"
+                ? theme.colors.palette.neutral100
+                : theme.colors.textDim
+            }
+            style={themed($filterTriggerIcon)}
+          />
+        </Pressable>
       </ScrollView>
     </View>
   )
@@ -146,8 +334,8 @@ export default function HomeScreen() {
           <Text text="No listings found" preset="subheading" style={themed($emptyText)} />
           <Text
             text={
-              selectedCategory
-                ? "Try selecting a different category"
+              selectedCategory || priceFilter !== "all"
+                ? "Try adjusting your filters"
                 : "Be the first to list something!"
             }
             style={themed($emptySubtext)}
@@ -162,12 +350,13 @@ export default function HomeScreen() {
 
   return (
     <Screen preset="fixed" safeAreaEdges={["top"]} contentContainerStyle={themed($container)}>
-      <FlatList
+      <FlashList
         data={listings ?? []}
         renderItem={renderListingCard}
         keyExtractor={keyExtractor}
+        masonry
         numColumns={2}
-        columnWrapperStyle={themed($columnWrapper)}
+        estimatedItemSize={200}
         contentContainerStyle={themed($listContent)}
         ListHeaderComponent={renderHeader}
         ListEmptyComponent={renderEmptyState}
@@ -180,6 +369,11 @@ export default function HomeScreen() {
           />
         }
       />
+
+      {/* Selection Sheets */}
+      <SelectionSheet ref={categorySheetRef} />
+      <SelectionSheet ref={priceSheetRef} />
+      <SelectionSheet ref={sortSheetRef} />
 
       {/* AI Assistant Floating Action Button */}
       <Pressable
@@ -217,43 +411,48 @@ const $searchInput: ThemedStyle<TextStyle> = ({ colors, spacing }) => ({
   borderColor: colors.palette.neutral300,
 })
 
-const $categoriesContainer: ThemedStyle<ViewStyle> = ({ spacing }) => ({
+const $filterRow: ThemedStyle<ViewStyle> = ({ spacing }) => ({
   paddingHorizontal: spacing.md,
-  paddingBottom: spacing.md,
+  paddingBottom: spacing.sm,
+  flexDirection: "row",
+  alignItems: "center",
+  gap: spacing.xs,
 })
 
-const $categoryPill: ThemedStyle<ViewStyle> = ({ colors, spacing }) => ({
+const $filterTrigger: ThemedStyle<ViewStyle> = ({ colors, spacing }) => ({
+  flexDirection: "row",
+  alignItems: "center",
   paddingHorizontal: spacing.md,
   paddingVertical: spacing.xs,
   borderRadius: 20,
   backgroundColor: colors.palette.neutral100,
-  marginRight: spacing.xs,
   borderWidth: 1,
   borderColor: colors.palette.neutral300,
+  gap: spacing.xs,
 })
 
-const $categoryPillActive: ThemedStyle<ViewStyle> = ({ colors }) => ({
+const $filterTriggerActive: ThemedStyle<ViewStyle> = ({ colors }) => ({
   backgroundColor: colors.tint,
   borderColor: colors.tint,
 })
 
-const $categoryText: ThemedStyle<TextStyle> = ({ colors }) => ({
+const $filterTriggerText: ThemedStyle<TextStyle> = ({ colors }) => ({
   color: colors.text,
   fontSize: 14,
   fontWeight: "500",
 })
 
-const $categoryTextActive: ThemedStyle<TextStyle> = ({ colors }) => ({
+const $filterTriggerTextActive: ThemedStyle<TextStyle> = ({ colors }) => ({
   color: colors.palette.neutral100,
+})
+
+const $filterTriggerIcon: ThemedStyle<ViewStyle> = () => ({
+  transform: [{ rotate: "-90deg" }],
 })
 
 const $listContent: ThemedStyle<ViewStyle> = ({ spacing }) => ({
   paddingHorizontal: spacing.md,
   paddingBottom: spacing.xxl,
-})
-
-const $columnWrapper: ThemedStyle<ViewStyle> = () => ({
-  justifyContent: "space-between",
 })
 
 const $emptyContainer: ThemedStyle<ViewStyle> = ({ spacing }) => ({
@@ -266,7 +465,9 @@ const $emptyContainer: ThemedStyle<ViewStyle> = ({ spacing }) => ({
 
 const $emptyEmoji: TextStyle = {
   fontSize: 48,
+  lineHeight: 56,
   marginBottom: 16,
+  includeFontPadding: false,
 }
 
 const $emptyText: ThemedStyle<TextStyle> = ({ colors }) => ({

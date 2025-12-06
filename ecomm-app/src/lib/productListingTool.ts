@@ -44,6 +44,15 @@ export type ProductListingParams = {
 }
 
 /**
+ * Stored product image captured via Gemini function calls
+ */
+export type StoredProductImage = {
+  imageBase64: string
+  description: string
+  timestamp: number
+}
+
+/**
  * Validates and normalizes product listing parameters
  */
 export function validateProductParams(args: Record<string, unknown>): ProductListingParams {
@@ -172,6 +181,28 @@ export class CreateProductListingTool extends FunctionCallDefinition {
     // Default behavior if no callback set
     console.log("[CreateProductListingTool] No execute callback set, returning default success")
     return { success: true }
+  }
+}
+
+/**
+ * StoreProductImageTool - Captures current frame with a description (non-blocking)
+ */
+export class StoreProductImageTool extends FunctionCallDefinition {
+  constructor() {
+    super(
+      "store_product_image",
+      "Captures the current video frame with a description of what's visible (angle/condition/defects). Call this multiple times as the user moves around the product.",
+      {
+        properties: {
+          description: {
+            type: "string",
+            description:
+              "Description of what the frame shows: angle (front/back/side/top/bottom), visible defects or wear, materials, or notable features.",
+          },
+        },
+      },
+      ["description"],
+    )
   }
 }
 

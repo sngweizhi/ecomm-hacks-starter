@@ -1,77 +1,231 @@
-# Welcome to your new ignited app!
+# E-Commerce Marketplace App
 
-> The latest and greatest boilerplate for Infinite Red opinions
+An AI-powered campus marketplace built with React Native and Expo, featuring
+voice-first product listing creation, semantic search, and an intelligent chat
+assistant for product recommendations.
 
-This is the boilerplate that [Infinite Red](https://infinite.red) uses as a way to test bleeding-edge changes to our React Native stack.
+## Features
 
-- [Quick start documentation](https://github.com/infinitered/ignite/blob/master/docs/boilerplate/Boilerplate.md)
-- [Full documentation](https://github.com/infinitered/ignite/blob/master/docs/README.md)
+- **AI-Powered Product Search**: Semantic search using RAG (Retrieval-Augmented
+  Generation) to find products by meaning, not just keywords
+- **Voice-First Listing Creation**: Record a video of your product and let AI
+  extract details automatically
+- **AI Chat Assistant**: Conversational interface for product recommendations
+  and marketplace queries
+- **Product Image Generation**: AI-generated product images from descriptions
+- **Categories & Campus Listings**: Organized by category with campus-specific
+  filtering
+- **Favorites System**: Save products you're interested in
+- **Real-Time Messaging**: Direct communication between buyers and sellers
+- **Real-Time Updates**: Live data synchronization via Convex
+
+## Tech Stack
+
+### Frontend
+
+- **React Native** 0.81.5 - Cross-platform mobile framework
+- **Expo** 54.0.27 - Development platform and tooling
+- **Expo Router** 6.0.10 - File-based routing
+- **TypeScript** - Type-safe development
+- **Zustand** - Lightweight state management
+
+### Backend & Database
+
+- **Convex** - Serverless backend and real-time database
+- **Convex Agent Component** - AI agent framework
+- **Convex RAG Component** - Retrieval-augmented generation for semantic search
+
+### Authentication
+
+- **Clerk** (@clerk/clerk-expo) - User authentication and management
+
+### AI/ML
+
+- **Google Gemini**:
+  - `gemini-2.0-flash` - Chat agent for conversations and tool use
+  - `text-embedding-004` - Vector embeddings for semantic search (768
+    dimensions)
+- **Gemini Live API** - Real-time voice interactions
+- **AI SDK** (@ai-sdk/google) - Unified AI SDK for Google models
+
+### UI Libraries
+
+- **React Navigation** - Bottom tabs and native stack navigation
+- **Shopify Flash List** - High-performance list rendering
+- **React Native Reanimated** - Smooth animations
+- **Gorhom Bottom Sheet** - Bottom sheet modals
+- **Phosphor React Native** - Icon library
+
+### Media & Camera
+
+- **React Native Vision Camera** - Product photo capture
+- **Expo AV** - Audio/video playback
+- **React Native Live Audio Stream** - Real-time audio streaming
+- **Expo Image Picker** - Image selection
+- **Expo Image Manipulator** - Image processing
+
+### Internationalization
+
+- **i18next** & **react-i18next** - Multi-language support
+- **date-fns** - Date formatting
+
+### Development Tools
+
+- **ESLint** - Code linting
+- **Prettier** - Code formatting
+- **Jest** - Testing framework
+- **Maestro** - End-to-end testing
+- **Reactotron** - Development debugging
 
 ## Getting Started
 
+### Prerequisites
+
+- Node.js >= 20.0.0
+- pnpm (recommended) or npm
+- Expo CLI
+- Convex account
+- Clerk account
+- Google Cloud account (for Gemini API)
+
+### Installation
+
+1. **Clone the repository and install dependencies:**
+
 ```bash
+cd ecomm-app
 pnpm install
+```
+
+2. **Set up environment variables:**
+
+Create a `.env.local` file in the `ecomm-app` directory with the following
+variables:
+
+```env
+EXPO_PUBLIC_CLERK_PUBLISHABLE_KEY=your_clerk_publishable_key
+EXPO_PUBLIC_CONVEX_URL=your_convex_deployment_url
+```
+
+3. **Configure Convex:**
+
+```bash
+# Install Convex CLI if you haven't already
+npm install -g convex
+
+# Login to Convex
+npx convex login
+
+# Set up your Convex project (if not already done)
+npx convex dev
+
+# Set the Gemini API key in Convex secrets
+npx convex env set GEMINI_API_KEY "your_gemini_api_key"
+
+# Configure Clerk JWT issuer domain in Convex Dashboard
+# Set CLERK_JWT_ISSUER_DOMAIN in Convex Dashboard settings
+```
+
+4. **Configure Clerk:**
+
+- Create a Clerk application at [clerk.com](https://clerk.com)
+- Get your publishable key and add it to `.env.local`
+- Configure the JWT issuer domain in your Convex Dashboard
+
+5. **Start the development server:**
+
+```bash
 pnpm run start
 ```
 
-To make things work on your local simulator, or on your phone, you need first to [run `eas build`](https://github.com/infinitered/ignite/blob/master/docs/expo/EAS.md). We have many shortcuts on `package.json` to make it easier:
+### Building for Devices
+
+To build for iOS simulator:
 
 ```bash
-pnpm run build:ios:sim # build for ios simulator
-pnpm run build:ios:device # build for ios device
-pnpm run build:ios:prod # build for ios device
+pnpm run build:ios:sim
 ```
 
-### `./assets` directory
+To build for iOS device:
 
-This directory is designed to organize and store various assets, making it easy for you to manage and use them in your application. The assets are further categorized into subdirectories, including `icons` and `images`:
-
-```tree
-assets
-├── icons
-└── images
+```bash
+pnpm run build:ios:device
 ```
 
-**icons**
-This is where your icon assets will live. These icons can be used for buttons, navigation elements, or any other UI components. The recommended format for icons is PNG, but other formats can be used as well.
+To build for Android:
 
-Ignite comes with a built-in `Icon` component. You can find detailed usage instructions in the [docs](https://github.com/infinitered/ignite/blob/master/docs/boilerplate/app/components/Icon.md).
-
-**images**
-This is where your images will live, such as background images, logos, or any other graphics. You can use various formats such as PNG, JPEG, or GIF for your images.
-
-Another valuable built-in component within Ignite is the `AutoImage` component. You can find detailed usage instructions in the [docs](https://github.com/infinitered/ignite/blob/master/docs/Components-AutoImage.md).
-
-How to use your `icon` or `image` assets:
-
-```typescript
-import { Image } from 'react-native';
-
-const MyComponent = () => {
-  return (
-    <Image source={require('assets/images/my_image.png')} />
-  );
-};
+```bash
+pnpm run build:android:sim    # Simulator
+pnpm run build:android:device # Physical device
 ```
 
-## Running Maestro end-to-end tests
+## Project Structure
 
-Follow our [Maestro Setup](https://ignitecookbook.com/docs/recipes/MaestroSetup) recipe.
+```
+ecomm-app/
+├── app/                    # Expo Router app directory
+│   ├── (tabs)/            # Tab navigation screens
+│   ├── category/          # Category detail pages
+│   ├── listing/           # Product listing detail pages
+│   ├── me/                # User profile and settings
+│   ├── messages/          # Messaging interface
+│   ├── search/            # Search interface
+│   └── sell/              # Product listing creation flow
+├── convex/                # Convex backend
+│   ├── lib/              # Shared utilities (auth, models, prompts, RAG)
+│   ├── listings.ts       # Listing queries and mutations
+│   ├── marketplaceAgent.ts  # AI chat agent
+│   ├── productImageGeneration.ts  # AI image generation
+│   └── schema.ts         # Database schema
+├── src/
+│   ├── components/       # Reusable UI components
+│   ├── hooks/            # Custom React hooks
+│   ├── lib/              # Client-side utilities (Gemini Live, product tools)
+│   ├── theme/            # Theme configuration (colors, typography, spacing)
+│   └── utils/            # Helper functions
+└── assets/               # Images and icons
+```
 
-## Next Steps
+## Key Integrations
 
-### Ignite Cookbook
+### Convex Backend
 
-[Ignite Cookbook](https://ignitecookbook.com/) is an easy way for developers to browse and share code snippets (or “recipes”) that actually work.
+- Serverless functions for data operations
+- Real-time subscriptions for live updates
+- Vector search for semantic product matching
+- AI agent integration for chat functionality
 
-### Upgrade Ignite boilerplate
+### Clerk Authentication
 
-Read our [Upgrade Guide](https://ignitecookbook.com/docs/recipes/UpdatingIgnite) to learn how to upgrade your Ignite project.
+- Secure user authentication
+- JWT-based session management
+- Integrated with Convex for protected routes
 
-## Community
+### Gemini AI
 
-⭐️ Help us out by [starring on GitHub](https://github.com/infinitered/ignite), filing bug reports in [issues](https://github.com/infinitered/ignite/issues) or [ask questions](https://github.com/infinitered/ignite/discussions).
+- Chat agent for product recommendations
+- Embeddings for semantic search
+- Live API for voice interactions
+- Image generation for product listings
 
-💬 Join us on [Slack](https://join.slack.com/t/infiniteredcommunity/shared_invite/zt-1f137np4h-zPTq_CbaRFUOR_glUFs2UA) to discuss.
+## Development
 
-📰 Make our Editor-in-chief happy by [reading the React Native Newsletter](https://reactnativenewsletter.com/).
+### Running Tests
+
+```bash
+pnpm test              # Run Jest tests
+pnpm test:watch        # Run tests in watch mode
+pnpm test:maestro      # Run Maestro E2E tests
+```
+
+### Code Quality
+
+```bash
+pnpm lint              # Lint and fix code
+pnpm lint:check        # Check linting without fixing
+pnpm compile           # Type check TypeScript
+```
+
+## License
+
+Built for hackathon demonstration purposes.

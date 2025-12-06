@@ -1,10 +1,14 @@
-import { View, ViewStyle, TextStyle, FlatList, Pressable, ActivityIndicator } from "react-native"
+import { useState, useEffect, useMemo, useCallback, useRef } from "react"
+import { View, ViewStyle, TextStyle, ScrollView, Pressable, ActivityIndicator } from "react-native"
 import { router } from "expo-router"
 import { useQuery } from "convex/react"
 
 import { Icon, IconTypes } from "@/components/Icon"
 import { Screen } from "@/components/Screen"
 import { Text } from "@/components/Text"
+import { TextField } from "@/components/TextField"
+import { Button } from "@/components/Button"
+import { SelectionSheet, type SelectionSheetRef, type SelectionSheetConfig } from "@/components/SelectionSheet"
 import { useAppTheme } from "@/theme/context"
 import type { ThemedStyle } from "@/theme/types"
 
@@ -36,9 +40,51 @@ type Category = {
 
 export default function CategoriesScreen() {
   const { themed, theme } = useAppTheme()
+  const selectionSheetRef = useRef<SelectionSheetRef>(null)
+  const openSelectionSheet = useCallback(
+    (config: SelectionSheetConfig) => selectionSheetRef.current?.present(config),
+    [],
+  )
 
   // Fetch categories from Convex
   const categories = useQuery(api.categories.list)
+
+  // Search state
+  const [searchQuery, setSearchQuery] = useState("")
+  const [debouncedSearchQuery, setDebouncedSearchQuery] = useState("")
+  const [selectedCategory, setSelectedCategory] = useState<string | null>(null)
+
+  // Debounce search input
+  useEffect(() => {
+    const timer = setTimeout(() => {
+      setDebouncedSearchQuery(searchQuery)
+    }, 300)
+
+    return () => clearTimeout(timer)
+  }, [searchQuery])
+
+  // Filter categories based on search query and selected category
+  const filteredCategories = useMemo(() => {
+    if (!categories) return []
+
+    let filtered = categories
+
+    // Filter by selected category
+    if (selectedCategory) {
+      filtered = filtered.filter((cat) => cat.slug === selectedCategory)
+    }
+
+    // Filter by search query
+    if (debouncedSearchQuery.trim()) {
+      const query = debouncedSearchQuery.toLowerCase().trim()
+      filtered = filtered.filter(
+        (cat) =>
+          cat.name.toLowerCase().includes(query) || cat.slug.toLowerCase().includes(query),
+      )
+    }
+
+    return filtered
+  }, [categories, debouncedSearchQuery, selectedCategory])
 
   const handleCategoryPress = (slug: string) => {
     router.push(`/category/${slug}`)
@@ -48,64 +94,203 @@ export default function CategoriesScreen() {
     router.push("/search")
   }
 
-  const renderCategory = ({ item }: { item: Category }) => {
+  const handleClearSearch = () => {
+    setSearchQuery("")
+    setDebouncedSearchQuery("")
+  }
+
+  const handleClearFilters = () => {
+    setSelectedCategory(null)
+    setSearchQuery("")
+    setDebouncedSearchQuery("")
+  }
+
+  const hasActiveFilters = selectedCategory !== null || debouncedSearchQuery.trim() !== ""
+
+  const renderCategory = (item: Category) => {
     const iconName = CATEGORY_ICONS[item.slug] ?? "dotsThreeCircle"
 
     return (
       <Pressable
-        style={({ pressed }) => [themed($categoryCard), pressed && themed($categoryCardPressed)]}
+        key={item._id}
+        style={({ pressed }) => [
+          themed($categoryCard),
+          pressed && themed($categoryCardPressed),
+        ]}
         onPress={() => handleCategoryPress(item.slug)}
       >
         <View style={themed($iconContainer)}>
-          <Icon icon={iconName} size={28} color={theme.colors.tint} />
+          <Icon icon={iconName} size={32} color={theme.colors.tint} />
         </View>
-        <View style={themed($categoryContent)}>
-          <Text text={item.name} style={themed($categoryName)} />
-          <CategoryListingCount category={item.slug} />
-        </View>
-        <Icon icon="caretRight" size={20} color={theme.colors.textDim} />
+        <Text text={item.name} style={themed($categoryName)} numberOfLines={2} />
+        <CategoryListingCount category={item.slug} />
       </Pressable>
     )
   }
+
+  const renderFilters = () => (
+    <View style={themed($filterRowContainer)}>
+      <ScrollView
+        horizontal
+        showsHorizontalScrollIndicator={false}
+        contentContainerStyle={themed($filterRow)}
+        style={themed($filterScrollView)}
+      >
+      {/* Search Input */}
+      <View style={themed($searchInputWrapper)}>
+        <Icon icon="magnifyingGlass" size={16} color={theme.colors.textDim} />
+        <TextField
+          placeholder="Search..."
+          value={searchQuery}
+          onChangeText={setSearchQuery}
+          containerStyle={themed($searchInputContainer)}
+          inputWrapperStyle={themed($searchInputField)}
+          style={themed($searchInput)}
+          RightAccessory={
+            searchQuery
+              ? (props) => (
+                  <Pressable onPress={handleClearSearch}>
+                    <Icon icon="x" size={14} color={theme.colors.textDim} />
+                  </Pressable>
+                )
+              : undefined
+          }
+        />
+      </View>
+
+        {/* Category Filter */}
+        <Pressable
+          style={[
+            themed($filterChip),
+            selectedCategory && themed($filterChipActive),
+          ]}
+          onPress={() =>
+            openSelectionSheet({
+              title: "Category",
+              options: [
+                { value: null, label: "All Categories" },
+                ...(categories?.map((c) => ({ value: c.slug, label: c.name })) ?? []),
+              ],
+              selectedValue: selectedCategory,
+              onSelect: (value) => setSelectedCategory((value as string) ?? null),
+            })
+          }
+        >
+          <Text
+            text={
+              selectedCategory
+                ? (categories?.find((c) => c.slug === selectedCategory)?.name ?? "Category")
+                : "Category"
+            }
+            style={[
+              themed($filterChipText),
+              selectedCategory && themed($filterChipTextActive),
+            ]}
+            numberOfLines={1}
+          />
+          <Icon
+            icon="caretRight"
+            size={12}
+            color={selectedCategory ? theme.colors.palette.neutral100 : theme.colors.textDim}
+            style={{ transform: [{ rotate: "90deg" }] }}
+          />
+        </Pressable>
+
+        {/* Advanced Search */}
+        <Pressable style={themed($filterChip)} onPress={handleSearchPress}>
+          <Text text="Advanced" style={themed($filterChipText)} numberOfLines={1} />
+          <Icon icon="magnifyingGlass" size={14} color={theme.colors.textDim} />
+        </Pressable>
+
+        {/* Clear Filters */}
+        {hasActiveFilters && (
+          <Pressable style={themed($clearFiltersChip)} onPress={handleClearFilters}>
+            <Icon icon="x" size={14} color={theme.colors.error} />
+            <Text text="Clear" style={themed($clearFiltersText)} />
+          </Pressable>
+        )}
+      </ScrollView>
+    </View>
+  )
 
   const renderHeader = () => (
     <View>
       <View style={themed($header)}>
         <Text text="Categories" preset="heading" />
       </View>
-
-      {/* Search Button */}
-      <Pressable style={themed($searchButton)} onPress={handleSearchPress}>
-        <Icon icon="magnifyingGlass" size={20} color={theme.colors.textDim} />
-        <Text text="Search all listings..." style={themed($searchButtonText)} />
-      </Pressable>
+      {renderFilters()}
     </View>
   )
 
-  const renderEmpty = () => (
-    <View style={themed($emptyContainer)}>
-      {categories === undefined ? (
-        <ActivityIndicator size="large" color={theme.colors.tint} />
-      ) : (
-        <>
-          <Text text="📂" style={$emptyEmoji} />
-          <Text text="No categories found" style={themed($emptyText)} />
-        </>
-      )}
-    </View>
-  )
+  const renderEmpty = () => {
+    if (categories === undefined) {
+      return (
+        <View style={themed($emptyContainer)}>
+          <ActivityIndicator size="large" color={theme.colors.tint} />
+          <Text text="Loading categories..." style={themed($emptyText)} />
+        </View>
+      )
+    }
+
+    if (debouncedSearchQuery.trim() || selectedCategory) {
+      return (
+        <View style={themed($emptyContainer)}>
+          <Icon icon="magnifyingGlass" size={48} color={theme.colors.textDim} />
+          <Text text="No categories found" style={themed($emptyTitle)} />
+          <Text
+            text={
+              debouncedSearchQuery.trim() && selectedCategory
+                ? `No categories match "${debouncedSearchQuery}" in selected category`
+                : debouncedSearchQuery.trim()
+                  ? `No categories match "${debouncedSearchQuery}"`
+                  : "No categories in selected filter"
+            }
+            style={themed($emptyText)}
+          />
+          <View style={themed($emptyActions)}>
+            <Button text="Clear Filters" onPress={handleClearFilters} preset="default" />
+            <Button
+              text="Advanced Search"
+              onPress={handleSearchPress}
+              preset="filled"
+              style={themed($emptyButton)}
+            />
+          </View>
+        </View>
+      )
+    }
+
+    return (
+      <View style={themed($emptyContainer)}>
+        <Icon icon="package" size={48} color={theme.colors.textDim} />
+        <Text text="No categories available" style={themed($emptyTitle)} />
+        <Text text="Check back later for new categories" style={themed($emptyText)} />
+        <Button
+          text="Browse All Listings"
+          onPress={handleSearchPress}
+          preset="filled"
+          style={themed($emptyButton)}
+        />
+      </View>
+    )
+  }
 
   return (
     <Screen preset="fixed" safeAreaEdges={["top"]} contentContainerStyle={themed($container)}>
-      <FlatList
-        data={categories ?? []}
-        renderItem={renderCategory}
-        keyExtractor={(item) => item._id}
-        ListHeaderComponent={renderHeader}
-        ListEmptyComponent={renderEmpty}
-        contentContainerStyle={themed($listContainer)}
+      <ScrollView
+        contentContainerStyle={themed($scrollContent)}
         showsVerticalScrollIndicator={false}
-      />
+      >
+        {renderHeader()}
+        {filteredCategories.length === 0 ? (
+          renderEmpty()
+        ) : (
+          <View style={themed($categoriesGrid)}>
+            {filteredCategories.map((category) => renderCategory(category))}
+          </View>
+        )}
+      </ScrollView>
+      <SelectionSheet ref={selectionSheetRef} />
     </Screen>
   )
 }
@@ -135,38 +320,122 @@ const $header: ThemedStyle<ViewStyle> = ({ spacing }) => ({
   paddingBottom: spacing.sm,
 })
 
-const $searchButton: ThemedStyle<ViewStyle> = ({ colors, spacing }) => ({
+const $filterRowContainer: ThemedStyle<ViewStyle> = () => ({
+  width: "100%",
+})
+
+const $filterScrollView: ThemedStyle<ViewStyle> = () => ({
+  width: "100%",
+})
+
+const $filterRow: ThemedStyle<ViewStyle> = ({ spacing }) => ({
+  paddingHorizontal: spacing.md,
+  paddingBottom: spacing.md,
+  paddingRight: spacing.lg,
+  gap: spacing.xs,
+  alignItems: "center",
+  flexDirection: "row",
+})
+
+const $searchInputWrapper: ThemedStyle<ViewStyle> = ({ colors, spacing }) => ({
   flexDirection: "row",
   alignItems: "center",
   backgroundColor: colors.palette.neutral100,
-  marginHorizontal: spacing.md,
-  marginBottom: spacing.md,
-  paddingHorizontal: spacing.md,
-  paddingVertical: spacing.sm,
-  borderRadius: 20,
+  borderRadius: 16,
   borderWidth: 1,
   borderColor: colors.palette.neutral300,
-  gap: spacing.sm,
+  paddingHorizontal: spacing.sm,
+  paddingVertical: spacing.xs,
+  minHeight: 36,
+  gap: spacing.xxs,
+  flexShrink: 0,
+  width: 130,
 })
 
-const $searchButtonText: ThemedStyle<TextStyle> = ({ colors }) => ({
+const $searchInputContainer: ThemedStyle<ViewStyle> = () => ({
+  marginBottom: 0,
   flex: 1,
-  color: colors.textDim,
-  fontSize: 16,
 })
 
-const $listContainer: ThemedStyle<ViewStyle> = ({ spacing }) => ({
-  paddingHorizontal: spacing.md,
+const $searchInputField: ThemedStyle<ViewStyle> = () => ({
+  borderWidth: 0,
+  backgroundColor: "transparent",
+  paddingHorizontal: 0,
+  paddingVertical: 0,
+  minHeight: 0,
+})
+
+const $searchInput: ThemedStyle<TextStyle> = ({ spacing }) => ({
+  marginHorizontal: 0,
+  fontSize: 13,
+  paddingVertical: 0,
+  paddingHorizontal: spacing.xxs,
+})
+
+const $filterChip: ThemedStyle<ViewStyle> = ({ colors, spacing }) => ({
+  flexDirection: "row",
+  alignItems: "center",
+  backgroundColor: colors.palette.neutral100,
+  paddingHorizontal: spacing.sm,
+  paddingVertical: spacing.xs,
+  borderRadius: 16,
+  gap: spacing.xxs,
+  minHeight: 36,
+  flexShrink: 0,
+})
+
+const $filterChipActive: ThemedStyle<ViewStyle> = ({ colors }) => ({
+  backgroundColor: colors.tint,
+})
+
+const $filterChipText: ThemedStyle<TextStyle> = ({ colors }) => ({
+  fontSize: 13,
+  color: colors.text,
+  fontWeight: "500",
+})
+
+const $filterChipTextActive: ThemedStyle<TextStyle> = ({ colors }) => ({
+  color: colors.palette.neutral100,
+})
+
+const $clearFiltersChip: ThemedStyle<ViewStyle> = ({ colors, spacing }) => ({
+  flexDirection: "row",
+  alignItems: "center",
+  backgroundColor: colors.errorBackground,
+  paddingHorizontal: spacing.sm,
+  paddingVertical: spacing.xs,
+  borderRadius: 16,
+  gap: spacing.xxs,
+  minHeight: 36,
+  flexShrink: 0,
+})
+
+const $clearFiltersText: ThemedStyle<TextStyle> = ({ colors }) => ({
+  fontSize: 13,
+  color: colors.error,
+  fontWeight: "500",
+})
+
+const $scrollContent: ThemedStyle<ViewStyle> = ({ spacing }) => ({
   paddingBottom: spacing.lg,
 })
 
-const $categoryCard: ThemedStyle<ViewStyle> = ({ colors, spacing }) => ({
+const $categoriesGrid: ThemedStyle<ViewStyle> = ({ spacing }) => ({
   flexDirection: "row",
+  flexWrap: "wrap",
+  paddingHorizontal: spacing.md,
+  gap: spacing.sm,
+  justifyContent: "space-between",
+})
+
+const $categoryCard: ThemedStyle<ViewStyle> = ({ colors, spacing }) => ({
+  width: "48%",
   alignItems: "center",
   backgroundColor: colors.palette.neutral100,
   borderRadius: 12,
   padding: spacing.md,
-  marginBottom: spacing.sm,
+  minHeight: 140,
+  justifyContent: "center",
 })
 
 const $categoryCardPressed: ThemedStyle<ViewStyle> = ({ colors }) => ({
@@ -174,44 +443,60 @@ const $categoryCardPressed: ThemedStyle<ViewStyle> = ({ colors }) => ({
 })
 
 const $iconContainer: ThemedStyle<ViewStyle> = ({ colors, spacing }) => ({
-  width: 48,
-  height: 48,
-  borderRadius: 24,
+  width: 56,
+  height: 56,
+  borderRadius: 28,
   backgroundColor: colors.palette.primary100,
   justifyContent: "center",
   alignItems: "center",
-  marginRight: spacing.md,
+  marginBottom: spacing.sm,
 })
 
-const $categoryContent: ThemedStyle<ViewStyle> = () => ({
-  flex: 1,
-})
-
-const $categoryName: ThemedStyle<TextStyle> = ({ colors }) => ({
-  fontSize: 16,
+const $categoryName: ThemedStyle<TextStyle> = ({ colors, spacing }) => ({
+  fontSize: 14,
   fontWeight: "600",
   color: colors.text,
+  textAlign: "center",
+  marginBottom: spacing.xs,
 })
 
 const $categoryCount: ThemedStyle<TextStyle> = ({ colors }) => ({
-  fontSize: 13,
+  fontSize: 12,
   color: colors.textDim,
-  marginTop: 2,
+  textAlign: "center",
 })
 
 const $emptyContainer: ThemedStyle<ViewStyle> = ({ spacing }) => ({
-  flex: 1,
   justifyContent: "center",
   alignItems: "center",
   paddingVertical: spacing.xxxl,
+  paddingHorizontal: spacing.lg,
+  minHeight: 400,
 })
 
-const $emptyEmoji: TextStyle = {
-  fontSize: 48,
-  marginBottom: 16,
-}
+const $emptyTitle: ThemedStyle<TextStyle> = ({ colors, spacing }) => ({
+  color: colors.text,
+  fontSize: 18,
+  fontWeight: "600",
+  marginTop: spacing.md,
+  marginBottom: spacing.xs,
+})
 
-const $emptyText: ThemedStyle<TextStyle> = ({ colors }) => ({
+const $emptyText: ThemedStyle<TextStyle> = ({ colors, spacing }) => ({
   color: colors.textDim,
-  fontSize: 16,
+  fontSize: 14,
+  textAlign: "center",
+  marginBottom: spacing.lg,
+})
+
+const $emptyActions: ThemedStyle<ViewStyle> = ({ spacing }) => ({
+  flexDirection: "row",
+  gap: spacing.sm,
+  width: "100%",
+  justifyContent: "center",
+})
+
+const $emptyButton: ThemedStyle<ViewStyle> = () => ({
+  flex: 1,
+  maxWidth: 200,
 })

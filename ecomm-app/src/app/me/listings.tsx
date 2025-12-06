@@ -1,4 +1,4 @@
-import { useState } from "react"
+import { useState, useRef, useCallback } from "react"
 import {
   View,
   ViewStyle,
@@ -7,7 +7,6 @@ import {
   FlatList,
   Image,
   ActivityIndicator,
-  Alert,
 } from "react-native"
 import { router } from "expo-router"
 import { useQuery, useMutation } from "convex/react"
@@ -15,6 +14,7 @@ import { useQuery, useMutation } from "convex/react"
 import { Icon } from "@/components/Icon"
 import { Screen } from "@/components/Screen"
 import { Text } from "@/components/Text"
+import { ActionSheet, type ActionSheetRef, type ActionSheetConfig } from "@/components/ActionSheet"
 import { useAuth } from "@/context/AuthContext"
 import { useAppTheme } from "@/theme/context"
 import type { ThemedStyle } from "@/theme/types"
@@ -28,6 +28,11 @@ type FilterTab = "all" | ListingStatus
 export default function MyListingsScreen() {
   const { themed, theme } = useAppTheme()
   const { isAuthenticated } = useAuth()
+  const actionSheetRef = useRef<ActionSheetRef>(null)
+  const showSheet = useCallback(
+    (sheetConfig: ActionSheetConfig) => actionSheetRef.current?.present(sheetConfig),
+    [],
+  )
   const [activeTab, setActiveTab] = useState<FilterTab>("all")
 
   // Fetch user's listings based on filter
@@ -39,7 +44,7 @@ export default function MyListingsScreen() {
 
   // Mutations
   const markSold = useMutation(api.listings.markSold)
-  const archiveListing = useMutation(api.listings.archive)
+  const deleteListing = useMutation(api.listings.deleteListing)
 
   const handleBack = () => {
     router.back()
@@ -50,42 +55,51 @@ export default function MyListingsScreen() {
   }
 
   const handleEditListing = (listing: Doc<"listings">) => {
-    Alert.alert("Manage Listing", `What would you like to do with "${listing.title}"?`, [
+    const actions: ActionSheetConfig["actions"] = [
       { text: "Cancel", style: "cancel" },
-      {
-        text: "View",
-        onPress: () => router.push(`/listing/${listing._id}`),
-      },
-      ...(listing.status === "active"
-        ? [
-            {
-              text: "Mark as Sold",
-              onPress: async () => {
-                try {
-                  await markSold({ id: listing._id })
-                } catch {
-                  Alert.alert("Error", "Failed to mark listing as sold")
-                }
-              },
-            },
-          ]
-        : []),
-      ...(listing.status !== "archived"
-        ? [
-            {
-              text: "Delete",
-              style: "destructive" as const,
-              onPress: async () => {
-                try {
-                  await archiveListing({ id: listing._id })
-                } catch {
-                  Alert.alert("Error", "Failed to delete listing")
-                }
-              },
-            },
-          ]
-        : []),
-    ])
+      { text: "View", onPress: () => router.push(`/listing/${listing._id}`) },
+    ]
+
+    if (listing.status === "active") {
+      actions.push({
+        text: "Mark as Sold",
+        onPress: async () => {
+          try {
+            await markSold({ id: listing._id })
+          } catch {
+            showSheet({
+              title: "Error",
+              message: "Failed to mark listing as sold",
+              actions: [{ text: "Dismiss", style: "primary" }],
+            })
+          }
+        },
+      })
+    }
+
+    if (listing.status !== "archived") {
+      actions.push({
+        text: "Delete",
+        style: "destructive",
+        onPress: async () => {
+          try {
+            await deleteListing({ id: listing._id })
+          } catch {
+            showSheet({
+              title: "Error",
+              message: "Failed to delete listing",
+              actions: [{ text: "Dismiss", style: "primary" }],
+            })
+          }
+        },
+      })
+    }
+
+    showSheet({
+      title: "Manage Listing",
+      message: `What would you like to do with "${listing.title}"?`,
+      actions,
+    })
   }
 
   const renderListing = ({ item }: { item: Doc<"listings"> }) => (
@@ -181,6 +195,7 @@ export default function MyListingsScreen() {
           ListEmptyComponent={renderEmptyState}
         />
       )}
+      <ActionSheet ref={actionSheetRef} />
     </Screen>
   )
 }
