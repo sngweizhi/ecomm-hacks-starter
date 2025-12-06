@@ -29,3 +29,7 @@ __pycache__/
 venv/
 .env
 .python-version
+
+# Excluded directories
+Zeika/
+react-demo-app/
