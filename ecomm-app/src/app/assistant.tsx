@@ -7,3 +7,4 @@ import { MarketplaceChatView } from "@/components/MarketplaceChatView"
 export default function AssistantScreen() {
   return <MarketplaceChatView />
 }
+

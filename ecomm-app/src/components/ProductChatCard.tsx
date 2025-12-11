@@ -138,3 +138,4 @@ const $arrowText: ThemedStyle<TextStyle> = ({ colors }) => ({
   fontSize: 18,
   color: colors.textDim,
 })
+

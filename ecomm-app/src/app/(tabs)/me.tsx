@@ -1,4 +1,4 @@
-import { View, ViewStyle, TextStyle, Pressable, Image, ActivityIndicator } from "react-native"
+import { View, ViewStyle, TextStyle, Pressable, Image, ImageStyle, ActivityIndicator } from "react-native"
 import { router } from "expo-router"
 import { useQuery } from "convex/react"
 
@@ -27,7 +27,7 @@ export default function MeScreen() {
   const userStats = useQuery(api.listings.getUserStats, isAuthenticated ? {} : "skip")
 
   const handleMenuPress = (route: string) => {
-    router.push(route)
+    router.push(route as any)
   }
 
   const handleLogout = async () => {
@@ -125,7 +125,7 @@ const $avatarContainer: ThemedStyle<ViewStyle> = ({ spacing }) => ({
   marginBottom: spacing.md,
 })
 
-const $avatar: ThemedStyle<ViewStyle> = () => ({
+const $avatar: ThemedStyle<ImageStyle> = () => ({
   width: 100,
   height: 100,
   borderRadius: 50,

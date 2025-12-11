@@ -243,3 +243,4 @@ const $optionDescription: ThemedStyle<TextStyle> = ({ colors }) => ({
   color: colors.textDim,
   marginTop: 2,
 })
+

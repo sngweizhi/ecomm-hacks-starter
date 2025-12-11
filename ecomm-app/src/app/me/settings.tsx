@@ -172,3 +172,4 @@ const $versionText: ThemedStyle<TextStyle> = ({ colors }) => ({
   fontSize: 13,
   color: colors.textDim,
 })
+

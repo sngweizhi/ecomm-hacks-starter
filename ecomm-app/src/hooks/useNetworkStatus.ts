@@ -187,3 +187,4 @@ export async function isOnline(): Promise<boolean> {
   const status = await getNetworkStatus()
   return status.isOnline
 }
+

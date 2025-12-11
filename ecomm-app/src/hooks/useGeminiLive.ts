@@ -497,6 +497,11 @@ export function useGeminiLive(config: GeminiLiveConfig, options: UseGeminiLiveOp
     storedImagesRef.current = []
   }, [])
 
+  // Check if Gemini Live setup is complete and ready for audio/frames
+  const isSetupComplete = useCallback(() => {
+    return clientRef.current?.isSetupComplete() ?? false
+  }, [])
+
   return {
     status,
     lastError,
@@ -508,5 +513,6 @@ export function useGeminiLive(config: GeminiLiveConfig, options: UseGeminiLiveOp
     sendActivityStart,
     sendActivityEnd,
     clearStoredImages,
+    isSetupComplete,
   }
 }

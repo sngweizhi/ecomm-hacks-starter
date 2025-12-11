@@ -356,7 +356,6 @@ export default function HomeScreen() {
         keyExtractor={keyExtractor}
         masonry
         numColumns={2}
-        estimatedItemSize={200}
         contentContainerStyle={themed($listContent)}
         ListHeaderComponent={renderHeader}
         ListEmptyComponent={renderEmptyState}

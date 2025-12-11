@@ -2,6 +2,7 @@ import {
   View,
   ViewStyle,
   TextStyle,
+  ImageStyle,
   Pressable,
   FlatList,
   ActivityIndicator,
@@ -166,7 +167,7 @@ const $thumbnail: ThemedStyle<ViewStyle> = ({ colors, spacing }) => ({
   overflow: "hidden",
 })
 
-const $thumbnailImage: ThemedStyle<ViewStyle> = () => ({
+const $thumbnailImage: ThemedStyle<ImageStyle> = () => ({
   width: 70,
   height: 70,
 })

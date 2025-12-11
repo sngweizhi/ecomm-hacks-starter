@@ -699,7 +699,7 @@ function MessageBubble({
           isUser ? (
             <Text style={themed($userBubbleText)}>{cleanedText}</Text>
           ) : (
-            <MarkdownContent content={cleanedText} isStreaming={isStreamingOrPending} />
+            <MarkdownContent content={cleanedText} />
           )
         ) : null}
         {!isUser && isStreamingOrPending && !cleanedText && (

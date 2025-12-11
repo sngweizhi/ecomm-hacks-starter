@@ -3,6 +3,7 @@ import {
   View,
   ViewStyle,
   TextStyle,
+  ImageStyle,
   Pressable,
   FlatList,
   // eslint-disable-next-line no-restricted-imports
@@ -309,7 +310,7 @@ const $headerAvatar: ThemedStyle<ViewStyle> = ({ colors, spacing }) => ({
   overflow: "hidden",
 })
 
-const $headerAvatarImage: ThemedStyle<ViewStyle> = () => ({
+const $headerAvatarImage: ThemedStyle<ImageStyle> = () => ({
   width: 40,
   height: 40,
 })

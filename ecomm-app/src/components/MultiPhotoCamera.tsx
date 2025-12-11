@@ -2,6 +2,7 @@ import { useCallback, useEffect, useRef, useState } from "react"
 import {
   View,
   ViewStyle,
+  TextStyle,
   Modal,
   Pressable,
   Image,
@@ -11,7 +12,7 @@ import {
 } from "react-native"
 import * as FileSystem from "expo-file-system/legacy"
 import { Camera, useCameraDevice, useCameraPermission } from "react-native-vision-camera"
-import { X, Check, Circle } from "phosphor-react-native"
+import { X, Check } from "phosphor-react-native"
 
 import { Text } from "@/components/Text"
 import { Button } from "@/components/Button"
@@ -244,7 +245,7 @@ const $closeButton: ThemedStyle<ViewStyle> = ({ spacing }) => ({
   alignItems: "center",
 })
 
-const $headerText: ThemedStyle<ViewStyle> = ({ colors }) => ({
+const $headerText: ThemedStyle<TextStyle> = ({ colors }) => ({
   fontSize: 16,
   fontWeight: "600",
   color: colors.palette.neutral100,
@@ -271,7 +272,7 @@ const $cameraPlaceholder: ThemedStyle<ViewStyle> = ({ colors, spacing }) => ({
   gap: spacing.md,
 })
 
-const $placeholderText: ThemedStyle<ViewStyle> = ({ colors }) => ({
+const $placeholderText: ThemedStyle<TextStyle> = ({ colors }) => ({
   fontSize: 16,
   color: colors.palette.neutral400,
   textAlign: "center",
@@ -324,7 +325,7 @@ const $previewNumber: ThemedStyle<ViewStyle> = ({ colors }) => ({
   alignItems: "center",
 })
 
-const $previewNumberText: ThemedStyle<ViewStyle> = ({ colors }) => ({
+const $previewNumberText: ThemedStyle<TextStyle> = ({ colors }) => ({
   fontSize: 10,
   fontWeight: "600",
   color: colors.palette.neutral100,
@@ -367,3 +368,4 @@ const $captureButtonInner: ThemedStyle<ViewStyle> = ({ colors }) => ({
   borderRadius: 28,
   backgroundColor: colors.palette.neutral900,
 })
+

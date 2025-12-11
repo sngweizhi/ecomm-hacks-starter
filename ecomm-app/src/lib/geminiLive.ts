@@ -7,8 +7,6 @@ import {
   FunctionResponseScheduling,
   GoogleGenAI,
   Modality,
-  StartSensitivity,
-  EndSensitivity,
   type LiveServerMessage,
   type Session,
 } from "@google/genai"
@@ -176,6 +174,12 @@ export class GeminiLiveClient {
   // Track recently processed audio chunks to prevent duplicates (simple size-based dedup)
   private recentAudioChunks: Map<string, number> = new Map()
   private readonly AUDIO_DEDUP_WINDOW_MS = 100 // 100ms window for deduplication
+  // Track if setup is complete (like the sample's WebSocketService.isSetupComplete)
+  private setupComplete = false
+  // Buffer for audio/frames sent before setup is complete
+  private pendingAudioBuffer: Array<{ pcmBase64: string; sampleRate: number }> = []
+  private pendingFrameBuffer: string[] = []
+  private readonly MAX_PENDING_BUFFER_SIZE = 5
 
   constructor(config: GeminiLiveConfig, callbacks: GeminiLiveCallbacks = {}) {
     this.apiKey = config.apiKey
@@ -239,11 +243,9 @@ export class GeminiLiveClient {
       // from background noise or brief pauses
       realtimeInputConfig: {
         automaticActivityDetection: {
-          disabled: false,
-          startOfSpeechSensitivity: StartSensitivity.START_SENSITIVITY_LOW,
-          endOfSpeechSensitivity: EndSensitivity.END_SENSITIVITY_LOW,
-          prefixPaddingMs: 20, // Default from docs
-          silenceDurationMs: 100, // Default from docs - reduced from 1500ms to improve responsiveness
+          // Client-side VAD: the app will send activityStart/activityEnd explicitly.
+          // This improves turn-taking latency and avoids "stuck open" turns due to noise/echo.
+          disabled: true,
         },
       },
     }
@@ -293,10 +295,32 @@ export class GeminiLiveClient {
   }
 
   /**
+   * Check if setup is complete and ready to send audio/frames
+   */
+  isSetupComplete(): boolean {
+    return this.setupComplete && !!this.session
+  }
+
+  /**
    * Send a JPEG frame (base64 string, no data URI prefix)
+   * Frames are buffered until setup is complete.
    */
   sendFrame(jpegBase64: string) {
     if (!this.session) return
+
+    // Buffer frames until setup is complete (like sample's WebSocketService pattern)
+    if (!this.setupComplete) {
+      // Keep only most recent frames to prevent unbounded growth
+      if (this.pendingFrameBuffer.length >= this.MAX_PENDING_BUFFER_SIZE) {
+        this.pendingFrameBuffer.shift()
+      }
+      this.pendingFrameBuffer.push(jpegBase64)
+      console.log("[GeminiLive] Buffering frame (setup not complete)", {
+        bufferedFrames: this.pendingFrameBuffer.length,
+      })
+      return
+    }
+
     const size = jpegBase64.length
     console.log("[GeminiLive] Sending frame", { sizeBytes: size, ts: Date.now() })
     // According to docs, images should be sent via media property
@@ -307,10 +331,27 @@ export class GeminiLiveClient {
 
   /**
    * Send PCM audio chunk (base64)
-   * According to Live API docs, audio should use the 'audio' property
+   * According to Live API docs, audio should use the 'audio' property.
+   * Audio is buffered until setup is complete.
    */
   sendAudio(pcmBase64: string, sampleRate = 16000) {
     if (!this.session) return
+
+    // Buffer audio until setup is complete (like sample's WebSocketService pattern)
+    if (!this.setupComplete) {
+      // Keep only most recent audio to prevent unbounded growth
+      if (this.pendingAudioBuffer.length >= this.MAX_PENDING_BUFFER_SIZE) {
+        this.pendingAudioBuffer.shift()
+      }
+      this.pendingAudioBuffer.push({ pcmBase64, sampleRate })
+      if (this.pendingAudioBuffer.length <= 2 || this.pendingAudioBuffer.length % 10 === 0) {
+        console.log("[GeminiLive] Buffering audio (setup not complete)", {
+          bufferedChunks: this.pendingAudioBuffer.length,
+        })
+      }
+      return
+    }
+
     const size = pcmBase64.length
     this.audioSendLogCount += 1
     if (this.audioSendLogCount <= 2 || this.audioSendLogCount % 30 === 0) {
@@ -325,6 +366,36 @@ export class GeminiLiveClient {
     this.session.sendRealtimeInput({
       audio: { data: pcmBase64, mimeType: `audio/pcm;rate=${sampleRate}` },
     })
+  }
+
+  /**
+   * Flush any buffered audio/frames after setup completes
+   */
+  private flushPendingBuffers() {
+    if (!this.session || !this.setupComplete) return
+
+    // Flush buffered frames (only send most recent one to avoid spam)
+    if (this.pendingFrameBuffer.length > 0) {
+      const latestFrame = this.pendingFrameBuffer.pop()!
+      this.pendingFrameBuffer = []
+      console.log("[GeminiLive] Flushing buffered frame after setup complete")
+      this.session.sendRealtimeInput({
+        media: { data: latestFrame, mimeType: "image/jpeg" },
+      })
+    }
+
+    // Flush buffered audio
+    if (this.pendingAudioBuffer.length > 0) {
+      console.log("[GeminiLive] Flushing buffered audio after setup complete", {
+        chunks: this.pendingAudioBuffer.length,
+      })
+      for (const { pcmBase64, sampleRate } of this.pendingAudioBuffer) {
+        this.session.sendRealtimeInput({
+          audio: { data: pcmBase64, mimeType: `audio/pcm;rate=${sampleRate}` },
+        })
+      }
+      this.pendingAudioBuffer = []
+    }
   }
 
   /**
@@ -397,13 +468,18 @@ export class GeminiLiveClient {
   }
 
   /**
-   * Close the Live connection
+   * Close the Live connection and reset all state
    */
   close() {
     console.log("[GeminiLive] close() called")
     this.isClosed = true
     this.isConnecting = false
+    this.setupComplete = false
     this.recentAudioChunks.clear() // Clear deduplication cache on close
+    this.pendingAudioBuffer = [] // Clear any buffered audio
+    this.pendingFrameBuffer = [] // Clear any buffered frames
+    this.audioLogCount = 0 // Reset counters for next session
+    this.audioSendLogCount = 0
     if (this.session) {
       this.session.close()
       this.session = undefined
@@ -423,11 +499,15 @@ export class GeminiLiveClient {
         })
       }
 
-      const setupComplete = (msg as any)?.setupComplete
-      if (setupComplete) {
+      const setupCompleteMsg = (msg as any)?.setupComplete
+      if (setupCompleteMsg) {
         console.log("[GeminiLive] Setup complete", {
           elapsedMs: this.connectStartedAtMs ? now - this.connectStartedAtMs : "n/a",
         })
+        // Mark setup as complete and flush any buffered audio/frames
+        this.setupComplete = true
+        this.flushPendingBuffers()
+
         this.callbacks.onMessage?.({
           type: GeminiLiveResponseType.SETUP_COMPLETE,
         })

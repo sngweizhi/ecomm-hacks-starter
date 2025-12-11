@@ -1,5 +1,5 @@
 import { useCallback } from "react"
-import { View, ViewStyle, ActivityIndicator } from "react-native"
+import { View, ViewStyle, TextStyle, ActivityIndicator } from "react-native"
 import { router, useFocusEffect } from "expo-router"
 
 import { Screen } from "@/components/Screen"
@@ -49,6 +49,6 @@ const $content: ThemedStyle<ViewStyle> = ({ spacing }) => ({
   gap: spacing.md,
 })
 
-const $loadingText: ThemedStyle<ViewStyle> = ({ colors }) => ({
+const $loadingText: ThemedStyle<TextStyle> = ({ colors }) => ({
   color: colors.textDim,
 })

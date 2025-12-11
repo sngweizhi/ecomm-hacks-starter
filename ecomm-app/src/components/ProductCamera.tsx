@@ -1,3 +1,35 @@
+/**
+ * ProductCamera - Streams video and audio to Gemini Live API
+ *
+ * MANUAL AUDIO FLOW TEST CHECKLIST:
+ * ---------------------------------
+ * 1. Connect: Tap to start session
+ *    - Observe: Status changes from "idle" → "connecting" → "connected"
+ *    - Console: "[GeminiLive] Setup complete" appears
+ *
+ * 2. Speak: Say "Hello, can you hear me?"
+ *    - Observe: Mic level indicator moves (inputLevel)
+ *    - Console: "[usePcmAudioStream] Audio chunk" logs appear
+ *    - Console: "[GeminiLive] Sending audio" logs appear
+ *
+ * 3. Model Responds: Wait for AI response
+ *    - Observe: Output level indicator moves (outputLevel)
+ *    - Observe: Mic is muted (isModelResponding = true)
+ *    - Console: "[useAudioPlayer] Flushed aggregated audio" logs appear
+ *
+ * 4. Interrupt: Speak while model is talking
+ *    - Observe: Model stops speaking, mic resumes
+ *    - Console: "[ProductCamera] Audio interrupted" appears
+ *
+ * 5. Resume: Continue conversation after interrupt
+ *    - Observe: Normal flow resumes
+ *    - Console: "[ProductCamera] Turn complete, resuming mic input"
+ *
+ * 6. Stop: End the session
+ *    - Observe: All levels reset to 0
+ *    - Console: "[GeminiLive] close() called"
+ */
+
 import { useCallback, useEffect, useMemo, useRef, useState } from "react"
 import { ActivityIndicator, StyleSheet, View } from "react-native"
 import * as FileSystem from "expo-file-system/legacy"
@@ -82,9 +114,16 @@ export function ProductCamera({
   const [isCapturing, setIsCapturing] = useState(false)
   const [cameraError, setCameraError] = useState<string | null>(null)
   const [micLevel, setMicLevel] = useState(0)
+  const micLevelRef = useRef(0)
   const [outputLevel, setOutputLevel] = useState(0)
   // Track if component is mounted to prevent camera operations after unmount
   const [isMounted, setIsMounted] = useState(true)
+  // Track if model is currently responding (to pause mic input and prevent echo/feedback)
+  const [isModelResponding, setIsModelResponding] = useState(false)
+  const isModelRespondingRef = useRef(false)
+  // Muting prevents echo loops and helps VAD detect end-of-speech.
+  // We keep a fallback-unmute below in case TURN_COMPLETE is missing.
+  const MUTE_MIC_WHILE_MODEL_SPEAKS = true
 
   const device = useCameraDevice("back")
   const { hasPermission: hasCameraPermission, requestPermission: requestCameraPermission } =
@@ -97,15 +136,28 @@ export function ProductCamera({
 
   // Track sample rate from audio chunks for logging (Gemini typically uses 24kHz)
   const sampleRateRef = useRef<number | undefined>(undefined)
+  // Throttle audio chunk logs to avoid JS-thread jank
+  const outputAudioChunkCountRef = useRef(0)
+  const suppressedOutputChunkCountRef = useRef(0)
 
-  const { enqueue: playAudioChunk, interrupt: interruptAudio } = useAudioPlayer({
-    // Gemini Live API uses 24kHz by default (configured in geminiLive.ts)
-    sampleRate: 24000,
-    prebufferMs: 500,
-    minBufferMs: 0,
-    maxBufferMs: 4000,
-    onLevel: setOutputLevel,
-  })
+  const {
+    enqueue: playAudioChunk,
+    interrupt: interruptAudio,
+    clear: clearAudio,
+    isPlaying: isOutputPlaying,
+  } =
+    useAudioPlayer({
+      // Gemini Live API uses 24kHz by default (configured in geminiLive.ts)
+      sampleRate: 24000,
+      // Now that we're forcing audio-api playback, we can reduce prebuffer for faster start.
+      prebufferMs: 200,
+      minBufferMs: 0,
+      // Allow larger buffer; we also enforce a soft drop limit in the player.
+      maxBufferMs: 30000,
+      // Native player has been choppy on some Android devices; force audio-api path.
+      preferNative: false,
+      onLevel: setOutputLevel,
+    })
 
   const geminiOptions = useMemo(
     () => ({
@@ -121,11 +173,18 @@ export function ProductCamera({
         onTextMessage?.(text)
       },
       onAudioData: (base64Pcm: string, mimeType?: string, sampleRate?: number) => {
-        console.log("[ProductCamera] onAudioData called", {
-          base64Length: base64Pcm?.length || 0,
-          mimeType,
-          sampleRate,
-        })
+        outputAudioChunkCountRef.current += 1
+        if (
+          outputAudioChunkCountRef.current <= 2 ||
+          outputAudioChunkCountRef.current % 50 === 0
+        ) {
+          console.log("[ProductCamera] onAudioData", {
+            base64Length: base64Pcm?.length || 0,
+            mimeType,
+            sampleRate,
+            count: outputAudioChunkCountRef.current,
+          })
+        }
 
         // Track and log sample rate for debugging
         if (sampleRate) {
@@ -139,9 +198,13 @@ export function ProductCamera({
           }
         }
 
-        // Mark model as responding and pause mic input
+        // Mark model as responding and pause mic input (via state for usePcmAudioStream isMuted)
         if (!isModelRespondingRef.current) {
+          // Ensure we don't play stale buffered audio from a previous turn (prevents overlap),
+          // but avoid stopping the engine (reduces fragmentation at response start).
+          clearAudio()
           isModelRespondingRef.current = true
+          setIsModelResponding(true)
           console.log("[ProductCamera] Model started responding, muting mic input")
         }
 
@@ -161,65 +224,158 @@ export function ProductCamera({
           }
         }
 
-        playAudioChunk(base64Pcm)
+        // If the user is currently speaking (client-side VAD), don't play model audio.
+        // This prevents overlap and reduces echo that would retrigger VAD.
+        if (isUserSpeakingRef.current) {
+          suppressedOutputChunkCountRef.current += 1
+          return
+        }
+
+        playAudioChunk(base64Pcm, sampleRate)
       },
       onTurnComplete: () => {
         // Resume mic input when model's turn is complete
         isModelRespondingRef.current = false
+        setIsModelResponding(false)
         console.log("[ProductCamera] Turn complete, resuming mic input")
       },
       onAudioInterrupted: () => {
+        // Stop any queued playback immediately to prevent overlapping audio after interruption.
+        interruptAudio()
         // Resume mic input when model is interrupted so user can speak again
         isModelRespondingRef.current = false
+        setIsModelResponding(false)
         console.log("[ProductCamera] Audio interrupted (model signal), resuming mic input")
       },
     }),
-    [interruptAudio, onListingCreated, onTextMessage, playAudioChunk],
+    [clearAudio, interruptAudio, isOutputPlaying, onListingCreated, onTextMessage, playAudioChunk, status],
   )
 
-  const { status, start, stop, sendFrameBase64, sendPcmBase64 } = useGeminiLive(
+  const { status, start, stop, sendFrameBase64, sendPcmBase64, sendActivityStart, sendActivityEnd } =
+    useGeminiLive(
     geminiConfig,
     geminiOptions,
   )
 
-  // Track if model is currently responding (to pause mic input and prevent false interruptions)
-  const isModelRespondingRef = useRef(false)
   // Track if we've initiated connection to prevent duplicate start() calls
   const hasStartedRef = useRef(false)
   // Track if stop was explicitly requested by user (to prevent auto-restart)
   const stopRequestedRef = useRef(false)
 
-  // Handle incoming PCM audio data - forward to Gemini only if model isn't responding
+  // Client-side VAD: we keep mic capture running but only forward audio during speech.
+  // Avoid muting at the capture layer so interruptions can be detected.
+  const isMicMuted = false
+  const shouldBufferAudio = status !== "connected"
+
+  // Handle incoming PCM audio data - forward to Gemini
+  // Note: Muting is now handled by usePcmAudioStream via isMuted option
+  const micChunkCountRef = useRef(0)
+  const isUserSpeakingRef = useRef(false)
+  const silenceChunkCountRef = useRef(0)
+  const speechStartConfirmCountRef = useRef(0)
+  // NOTE: micLevel (RMS) in this app is typically small (~0.001–0.02), so thresholds
+  // must be low or we will never detect speech.
+  const SPEECH_START_THRESHOLD = 0.004
+  const SPEECH_START_THRESHOLD_WHILE_PLAYING = 0.02
+  const SPEECH_END_THRESHOLD = 0.0025
+  const SPEECH_END_THRESHOLD_WHILE_PLAYING = 0.01
+  const START_CONFIRM_CHUNKS = 2
+  const START_CONFIRM_CHUNKS_WHILE_PLAYING = 3
+  const END_SILENCE_CHUNKS = 4 // ~4 * 64ms ≈ 256ms (faster turn-taking)
   const handlePcmData = useCallback(
     (base64Pcm: string) => {
-      // Don't send mic audio while model is responding to prevent echo/feedback
-      if (!isModelRespondingRef.current) {
-        sendPcmBase64(base64Pcm, 16000)
+      micChunkCountRef.current += 1
+      const levelNow = micLevelRef.current
+      const startTh = isOutputPlaying ? SPEECH_START_THRESHOLD_WHILE_PLAYING : SPEECH_START_THRESHOLD
+      const endTh = isOutputPlaying ? SPEECH_END_THRESHOLD_WHILE_PLAYING : SPEECH_END_THRESHOLD
+      const startConfirmChunks = isOutputPlaying ? START_CONFIRM_CHUNKS_WHILE_PLAYING : START_CONFIRM_CHUNKS
+
+      // Start speaking detection.
+      if (!isUserSpeakingRef.current) {
+        if (levelNow >= startTh) {
+          speechStartConfirmCountRef.current += 1
+        } else {
+          speechStartConfirmCountRef.current = 0
+        }
+
+        if (speechStartConfirmCountRef.current >= startConfirmChunks) {
+          isUserSpeakingRef.current = true
+          silenceChunkCountRef.current = 0
+          speechStartConfirmCountRef.current = 0
+
+          // If model audio is playing, stop it immediately to reduce echo and prevent overlap.
+          if (isOutputPlaying) {
+            interruptAudio()
+          }
+          sendActivityStart()
+        }
+      }
+
+      // If not in a speech segment, don't send audio (reduces noise + improves turn-taking).
+      if (!isUserSpeakingRef.current) {
+        return
+      }
+
+      // End-of-speech detection.
+      if (levelNow <= endTh) {
+        silenceChunkCountRef.current += 1
+        if (silenceChunkCountRef.current >= END_SILENCE_CHUNKS) {
+          isUserSpeakingRef.current = false
+          silenceChunkCountRef.current = 0
+          sendActivityEnd()
+        }
+        return
+      }
+
+      // Speaking: reset silence counter and send audio.
+      silenceChunkCountRef.current = 0
+      sendPcmBase64(base64Pcm, 16000)
+    },
+    [interruptAudio, isOutputPlaying, micLevel, sendActivityEnd, sendActivityStart, sendPcmBase64, shouldBufferAudio, status],
+  )
+
+  // Handle buffered audio chunks when connection becomes ready
+  const handleBufferedData = useCallback(
+    (chunks: string[]) => {
+      console.log("[ProductCamera] Sending buffered audio chunks", { count: chunks.length })
+      for (const chunk of chunks) {
+        sendPcmBase64(chunk, 16000)
       }
     },
     [sendPcmBase64],
   )
 
-  // PCM audio streaming hook
+  // PCM audio streaming hook with muting and buffering support
   const {
     isStreaming: isRecordingAudio,
     start: startAudioStream,
     stop: stopAudioStream,
+    clearBuffer: clearAudioBuffer,
     level: micLevelLive,
   } = usePcmAudioStream({
     onData: handlePcmData,
     onError: (error) => console.warn("PCM audio error:", error),
-    onLevel: setMicLevel,
+    onLevel: (lvl) => {
+      micLevelRef.current = lvl
+      setMicLevel(lvl)
+    },
+    isMuted: isMicMuted,
+    shouldBuffer: shouldBufferAudio,
+    onBufferedData: handleBufferedData,
   })
 
   // Create combined stop function that stops both Gemini stream and audio
   const handleStop = useCallback(() => {
+    console.log("[ProductCamera] Session stop requested - cleaning up resources")
     stopRequestedRef.current = true // Mark that user explicitly stopped
     stop() // Stop Gemini Live stream
     stopAudioStream() // Stop audio capture
+    clearAudioBuffer() // Clear any buffered audio
     // Reset state for next connection
     isModelRespondingRef.current = false
-  }, [stop, stopAudioStream])
+    setIsModelResponding(false)
+    console.log("[ProductCamera] Session stopped successfully")
+  }, [stop, stopAudioStream, clearAudioBuffer])
 
   // Expose stop function to parent via ref callback
   useEffect(() => {
@@ -312,12 +468,22 @@ export function ProductCamera({
     }
   }, [hasMicPermission, status, startAudioStream, stopAudioStream])
 
+  // Fallback: if we never receive TURN_COMPLETE but audio playback finishes,
+  // unmute the mic so the user can speak again (prevents "stuck muted" after first turn).
+  useEffect(() => {
+    if (isModelRespondingRef.current && !isOutputPlaying) {
+      isModelRespondingRef.current = false
+      setIsModelResponding(false)
+    }
+  }, [isOutputPlaying])
+
   useEffect(() => {
     if (status !== "connected") {
       setMicLevel(0)
       setOutputLevel(0)
       // Reset responding state when connection is lost/error to allow mic input on reconnect
       isModelRespondingRef.current = false
+      setIsModelResponding(false)
     }
   }, [status])
 
@@ -337,6 +503,10 @@ export function ProductCamera({
       return
     }
     if (isCapturing) {
+      return
+    }
+    // Reduce load while the user/model is speaking to improve responsiveness.
+    if (isUserSpeakingRef.current || isModelRespondingRef.current) {
       return
     }
 

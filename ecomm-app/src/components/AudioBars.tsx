@@ -96,6 +96,7 @@ export function AudioBars({
       return () => loop.stop()
     } else {
       idlePulse.setValue(0)
+      return undefined
     }
   }, [idlePulse, status])
 

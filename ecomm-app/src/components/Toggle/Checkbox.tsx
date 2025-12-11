@@ -102,7 +102,7 @@ function CheckboxInput(props: CheckboxInputProps) {
         ]}
       >
         <Image
-          source={icon ? iconRegistry[icon] : iconRegistry.check}
+          source={icon ? (iconRegistry[icon] as any) : (iconRegistry.check as any)}
           style={[
             $checkboxDetail,
             !!iconTintColor && { tintColor: iconTintColor },

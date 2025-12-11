@@ -18,6 +18,11 @@ export const PCM_CONFIG = {
    * Smaller = lower latency but more overhead.
    */
   bufferSize: 2048,
+  /**
+   * Maximum number of chunks to buffer when connection isn't ready.
+   * Prevents unbounded memory growth while allowing brief reconnects.
+   */
+  maxBufferedChunks: 10,
 } as const
 
 export type PcmAudioStreamState = "idle" | "starting" | "streaming" | "error"
@@ -25,6 +30,7 @@ export type PcmAudioStreamState = "idle" | "starting" | "streaming" | "error"
 export type UsePcmAudioStreamOptions = {
   /**
    * Called with each base64-encoded PCM chunk.
+   * Only called when not muted and not gated.
    */
   onData?: (base64Pcm: string) => void
   /**
@@ -35,6 +41,20 @@ export type UsePcmAudioStreamOptions = {
    * Called with a smoothed 0-1 RMS level derived from the PCM chunk.
    */
   onLevel?: (level: number) => void
+  /**
+   * If true, audio is captured but onData is not called (mic input is muted).
+   * Useful for pausing input while model is responding to prevent echo/feedback.
+   */
+  isMuted?: boolean
+  /**
+   * If true, audio is buffered instead of sent immediately.
+   * Useful when WebSocket connection isn't fully established yet.
+   */
+  shouldBuffer?: boolean
+  /**
+   * Called when buffered audio is ready to be flushed (after shouldBuffer becomes false).
+   */
+  onBufferedData?: (chunks: string[]) => void
 }
 
 // Access the native module directly to avoid type issues with the library's d.ts
@@ -55,9 +75,14 @@ const RNLiveAudioStream = NativeModules.RNLiveAudioStream as
 /**
  * Hook to capture live PCM audio from the microphone.
  * Only works on native platforms (iOS/Android). Returns no-op on web.
+ *
+ * Features:
+ * - Mute/unmute capability (isMuted option)
+ * - Buffering when connection isn't ready (shouldBuffer option)
+ * - Audio level metering via onLevel callback
  */
 export function usePcmAudioStream(options: UsePcmAudioStreamOptions = {}) {
-  const { onData, onError, onLevel } = options
+  const { onData, onError, onLevel, isMuted = false, shouldBuffer = false, onBufferedData } = options
   const [state, setState] = useState<PcmAudioStreamState>("idle")
   const [level, setLevel] = useState(0)
   const subscriptionRef = useRef<{ remove: () => void } | null>(null)
@@ -65,16 +90,49 @@ export function usePcmAudioStream(options: UsePcmAudioStreamOptions = {}) {
   const eventEmitterRef = useRef<NativeEventEmitter | null>(null)
   const chunkCountRef = useRef(0)
   const levelRef = useRef(0)
+  // Buffer for holding audio chunks when shouldBuffer is true
+  const audioBufferRef = useRef<string[]>([])
+  // Track muted/gated chunks for observability
+  const mutedChunkCountRef = useRef(0)
+  const bufferedChunkCountRef = useRef(0)
 
   // Store callbacks in refs to avoid re-subscriptions
   const onDataRef = useRef(onData)
   const onErrorRef = useRef(onError)
   const onLevelRef = useRef(onLevel)
+  const onBufferedDataRef = useRef(onBufferedData)
+  const isMutedRef = useRef(isMuted)
+  const shouldBufferRef = useRef(shouldBuffer)
+
   useEffect(() => {
     onDataRef.current = onData
     onErrorRef.current = onError
     onLevelRef.current = onLevel
-  }, [onData, onError, onLevel])
+    onBufferedDataRef.current = onBufferedData
+    isMutedRef.current = isMuted
+    shouldBufferRef.current = shouldBuffer
+  }, [onData, onError, onLevel, onBufferedData, isMuted, shouldBuffer])
+
+  // Flush buffered audio when shouldBuffer transitions from true to false
+  useEffect(() => {
+    if (!shouldBuffer && audioBufferRef.current.length > 0) {
+      const bufferedChunks = [...audioBufferRef.current]
+      audioBufferRef.current = []
+      console.log("[usePcmAudioStream] Flushing buffered audio", {
+        chunks: bufferedChunks.length,
+      })
+      // Notify via callback if provided
+      if (onBufferedDataRef.current) {
+        onBufferedDataRef.current(bufferedChunks)
+      } else {
+        // Otherwise send each chunk via onData
+        for (const chunk of bufferedChunks) {
+          onDataRef.current?.(chunk)
+        }
+      }
+      bufferedChunkCountRef.current = 0
+    }
+  }, [shouldBuffer])
 
   const decodeBase64ToBytes = useCallback((base64: string) => {
     if (!base64) return null
@@ -180,15 +238,50 @@ export function usePcmAudioStream(options: UsePcmAudioStreamOptions = {}) {
       eventEmitterRef.current.removeAllListeners("data")
       subscriptionRef.current = eventEmitterRef.current.addListener("data", (data: string) => {
         chunkCountRef.current += 1
+
+        // Always compute level for visualization (even when muted)
+        const levelValue = computeRmsLevel(data)
+        setLevel(levelValue)
+        onLevelRef.current?.(levelValue)
+
+        // Check if muted - capture audio but don't send it
+        if (isMutedRef.current) {
+          mutedChunkCountRef.current += 1
+          if (mutedChunkCountRef.current <= 2 || mutedChunkCountRef.current % 50 === 0) {
+            console.log("[usePcmAudioStream] Audio muted, not sending", {
+              mutedChunks: mutedChunkCountRef.current,
+            })
+          }
+          return
+        }
+
+        // Check if should buffer - store audio for later
+        if (shouldBufferRef.current) {
+          bufferedChunkCountRef.current += 1
+          // Prevent unbounded buffer growth
+          if (audioBufferRef.current.length < PCM_CONFIG.maxBufferedChunks) {
+            audioBufferRef.current.push(data)
+          } else {
+            // Drop oldest chunk when buffer is full (sliding window)
+            audioBufferRef.current.shift()
+            audioBufferRef.current.push(data)
+          }
+          if (bufferedChunkCountRef.current <= 2 || bufferedChunkCountRef.current % 25 === 0) {
+            console.log("[usePcmAudioStream] Buffering audio (connection not ready)", {
+              bufferedChunks: audioBufferRef.current.length,
+              totalBuffered: bufferedChunkCountRef.current,
+            })
+          }
+          return
+        }
+
+        // Normal path - send audio immediately
         if (chunkCountRef.current <= 3 || chunkCountRef.current % 25 === 0) {
           console.log("[usePcmAudioStream] Audio chunk", {
             sizeBytes: data.length,
             chunk: chunkCountRef.current,
           })
         }
-        const levelValue = computeRmsLevel(data)
-        setLevel(levelValue)
-        onLevelRef.current?.(levelValue)
         onDataRef.current?.(data)
       })
 
@@ -220,10 +313,16 @@ export function usePcmAudioStream(options: UsePcmAudioStreamOptions = {}) {
 
       // Stop the audio stream
       RNLiveAudioStream.stop()
-      console.log("[usePcmAudioStream] Streaming stopped after chunks", {
+      console.log("[usePcmAudioStream] Streaming stopped", {
         totalChunks: chunkCountRef.current,
+        mutedChunks: mutedChunkCountRef.current,
+        bufferedChunks: bufferedChunkCountRef.current,
       })
+      // Reset all counters and buffers
       chunkCountRef.current = 0
+      mutedChunkCountRef.current = 0
+      bufferedChunkCountRef.current = 0
+      audioBufferRef.current = []
       setState("idle")
       levelRef.current = 0
       setLevel(0)
@@ -251,13 +350,30 @@ export function usePcmAudioStream(options: UsePcmAudioStreamOptions = {}) {
     }
   }, [])
 
+  // Method to clear the audio buffer (useful when connection is reset)
+  const clearBuffer = useCallback(() => {
+    const clearedCount = audioBufferRef.current.length
+    audioBufferRef.current = []
+    bufferedChunkCountRef.current = 0
+    if (clearedCount > 0) {
+      console.log("[usePcmAudioStream] Buffer cleared", { clearedChunks: clearedCount })
+    }
+  }, [])
+
   return {
     state,
     isStreaming: state === "streaming",
     start,
     stop,
+    clearBuffer,
     sampleRate: PCM_CONFIG.sampleRate,
     mimeType: `audio/pcm;rate=${PCM_CONFIG.sampleRate}`,
     level,
+    // Observability stats
+    stats: {
+      totalChunks: chunkCountRef.current,
+      mutedChunks: mutedChunkCountRef.current,
+      bufferedChunks: audioBufferRef.current.length,
+    },
   }
 }

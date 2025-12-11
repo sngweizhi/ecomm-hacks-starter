@@ -257,19 +257,19 @@ const baseAction: ThemedStyle<ViewStyle> = ({ colors, spacing }) => ({
 
 const $action: ThemedStyle<ViewStyle> = baseAction
 
-const $actionDestructive: ThemedStyle<ViewStyle> = ({ colors, spacing }) => ({
-  ...baseAction({ colors, spacing }),
-  backgroundColor: colors.palette.error100 ?? "#FEE2E2",
+const $actionDestructive: ThemedStyle<ViewStyle> = (theme) => ({
+  ...baseAction(theme),
+  backgroundColor: "#FEE2E2",
 })
 
-const $actionPrimary: ThemedStyle<ViewStyle> = ({ colors, spacing }) => ({
-  ...baseAction({ colors, spacing }),
-  backgroundColor: colors.tint,
+const $actionPrimary: ThemedStyle<ViewStyle> = (theme) => ({
+  ...baseAction(theme),
+  backgroundColor: theme.colors.tint,
 })
 
-const $actionCancel: ThemedStyle<ViewStyle> = ({ colors, spacing }) => ({
-  ...baseAction({ colors, spacing }),
-  backgroundColor: colors.palette.neutral300,
+const $actionCancel: ThemedStyle<ViewStyle> = (theme) => ({
+  ...baseAction(theme),
+  backgroundColor: theme.colors.palette.neutral300,
 })
 
 const $actionText: ThemedStyle<TextStyle> = ({ colors }) => ({
@@ -278,19 +278,19 @@ const $actionText: ThemedStyle<TextStyle> = ({ colors }) => ({
   color: colors.text,
 })
 
-const $actionTextDestructive: ThemedStyle<TextStyle> = ({ colors }) => ({
-  ...$actionText({ colors }),
-  color: colors.error,
+const $actionTextDestructive: ThemedStyle<TextStyle> = (theme) => ({
+  ...$actionText(theme),
+  color: theme.colors.error,
 })
 
-const $actionTextPrimary: ThemedStyle<TextStyle> = ({ colors }) => ({
-  ...$actionText({ colors }),
-  color: colors.palette.neutral100,
+const $actionTextPrimary: ThemedStyle<TextStyle> = (theme) => ({
+  ...$actionText(theme),
+  color: theme.colors.palette.neutral100,
 })
 
-const $actionTextCancel: ThemedStyle<TextStyle> = ({ colors }) => ({
-  ...$actionText({ colors }),
-  color: colors.textDim,
+const $actionTextCancel: ThemedStyle<TextStyle> = (theme) => ({
+  ...$actionText(theme),
+  color: theme.colors.textDim,
 })
 
 // We need StyleSheet for spread usage above

@@ -2,6 +2,7 @@ import {
   View,
   ViewStyle,
   TextStyle,
+  ImageStyle,
   FlatList,
   Pressable,
   Image,
@@ -169,7 +170,7 @@ const $avatar: ThemedStyle<ViewStyle> = ({ colors, spacing }) => ({
   marginRight: spacing.md,
 })
 
-const $avatarImage: ThemedStyle<ViewStyle> = () => ({
+const $avatarImage: ThemedStyle<ImageStyle> = () => ({
   width: 50,
   height: 50,
   borderRadius: 25,
