@@ -118,9 +118,6 @@ export function usePcmAudioStream(options: UsePcmAudioStreamOptions = {}) {
     if (!shouldBuffer && audioBufferRef.current.length > 0) {
       const bufferedChunks = [...audioBufferRef.current]
       audioBufferRef.current = []
-      console.log("[usePcmAudioStream] Flushing buffered audio", {
-        chunks: bufferedChunks.length,
-      })
       // Notify via callback if provided
       if (onBufferedDataRef.current) {
         onBufferedDataRef.current(bufferedChunks)
@@ -200,7 +197,6 @@ export function usePcmAudioStream(options: UsePcmAudioStreamOptions = {}) {
   const start = useCallback(() => {
     // Only run on native platforms
     if (Platform.OS === "web" || !RNLiveAudioStream) {
-      console.warn("PCM audio streaming is not supported on this platform")
       return
     }
 
@@ -218,10 +214,6 @@ export function usePcmAudioStream(options: UsePcmAudioStreamOptions = {}) {
           channels: PCM_CONFIG.channels,
           bitsPerSample: PCM_CONFIG.bitsPerSample,
           audioSource: PCM_CONFIG.audioSource,
-          bufferSize: PCM_CONFIG.bufferSize,
-        })
-        console.log("[usePcmAudioStream] Initialized native stream", {
-          sampleRate: PCM_CONFIG.sampleRate,
           bufferSize: PCM_CONFIG.bufferSize,
         })
         isInitializedRef.current = true
@@ -247,11 +239,6 @@ export function usePcmAudioStream(options: UsePcmAudioStreamOptions = {}) {
         // Check if muted - capture audio but don't send it
         if (isMutedRef.current) {
           mutedChunkCountRef.current += 1
-          if (mutedChunkCountRef.current <= 2 || mutedChunkCountRef.current % 50 === 0) {
-            console.log("[usePcmAudioStream] Audio muted, not sending", {
-              mutedChunks: mutedChunkCountRef.current,
-            })
-          }
           return
         }
 
@@ -266,31 +253,17 @@ export function usePcmAudioStream(options: UsePcmAudioStreamOptions = {}) {
             audioBufferRef.current.shift()
             audioBufferRef.current.push(data)
           }
-          if (bufferedChunkCountRef.current <= 2 || bufferedChunkCountRef.current % 25 === 0) {
-            console.log("[usePcmAudioStream] Buffering audio (connection not ready)", {
-              bufferedChunks: audioBufferRef.current.length,
-              totalBuffered: bufferedChunkCountRef.current,
-            })
-          }
           return
         }
 
         // Normal path - send audio immediately
-        if (chunkCountRef.current <= 3 || chunkCountRef.current % 25 === 0) {
-          console.log("[usePcmAudioStream] Audio chunk", {
-            sizeBytes: data.length,
-            chunk: chunkCountRef.current,
-          })
-        }
         onDataRef.current?.(data)
       })
 
       // Start the audio stream
       RNLiveAudioStream.start()
-      console.log("[usePcmAudioStream] Streaming started")
       setState("streaming")
     } catch (error) {
-      console.error("Failed to start PCM audio stream:", error)
       setState("error")
       onErrorRef.current?.(error)
     }
@@ -313,11 +286,6 @@ export function usePcmAudioStream(options: UsePcmAudioStreamOptions = {}) {
 
       // Stop the audio stream
       RNLiveAudioStream.stop()
-      console.log("[usePcmAudioStream] Streaming stopped", {
-        totalChunks: chunkCountRef.current,
-        mutedChunks: mutedChunkCountRef.current,
-        bufferedChunks: bufferedChunkCountRef.current,
-      })
       // Reset all counters and buffers
       chunkCountRef.current = 0
       mutedChunkCountRef.current = 0
@@ -328,7 +296,6 @@ export function usePcmAudioStream(options: UsePcmAudioStreamOptions = {}) {
       setLevel(0)
       onLevelRef.current?.(0)
     } catch (error) {
-      console.error("Failed to stop PCM audio stream:", error)
       onErrorRef.current?.(error)
     }
   }, [])
@@ -352,12 +319,8 @@ export function usePcmAudioStream(options: UsePcmAudioStreamOptions = {}) {
 
   // Method to clear the audio buffer (useful when connection is reset)
   const clearBuffer = useCallback(() => {
-    const clearedCount = audioBufferRef.current.length
     audioBufferRef.current = []
     bufferedChunkCountRef.current = 0
-    if (clearedCount > 0) {
-      console.log("[usePcmAudioStream] Buffer cleared", { clearedChunks: clearedCount })
-    }
   }, [])
 
   return {

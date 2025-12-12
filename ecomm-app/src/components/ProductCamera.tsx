@@ -174,27 +174,20 @@ export function ProductCamera({
       },
       onAudioData: (base64Pcm: string, mimeType?: string, sampleRate?: number) => {
         outputAudioChunkCountRef.current += 1
-        if (
-          outputAudioChunkCountRef.current <= 2 ||
-          outputAudioChunkCountRef.current % 50 === 0
-        ) {
-          console.log("[ProductCamera] onAudioData", {
-            base64Length: base64Pcm?.length || 0,
-            mimeType,
-            sampleRate,
-            count: outputAudioChunkCountRef.current,
-          })
+        
+        // #region agent log
+        const chunkNum = outputAudioChunkCountRef.current
+        if (chunkNum % 5 === 0 || chunkNum <= 3) {
+          fetch('http://127.0.0.1:7242/ingest/0039e2fc-a7e4-4ef9-b946-c52a89a638e6',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'ProductCamera.tsx:175',message:'Model audio chunk received',data:{chunkNumber:chunkNum,isModelResponding:isModelRespondingRef.current,isOutputPlaying,chunkSize:base64Pcm?.length||0},timestamp:Date.now(),sessionId:'debug-session',runId:'run1',hypothesisId:'C'})}).catch(()=>{});
         }
+        // #endregion
 
-        // Track and log sample rate for debugging
+        // Track sample rate
         if (sampleRate) {
           if (!sampleRateRef.current) {
             sampleRateRef.current = sampleRate
-            console.log("[ProductCamera] Detected sample rate:", sampleRate, "Hz")
           } else if (sampleRate !== sampleRateRef.current) {
-            console.warn(
-              `[ProductCamera] Sample rate changed from ${sampleRateRef.current} to ${sampleRate} Hz (unexpected)`,
-            )
+            // Sample rate changed unexpectedly
           }
         }
 
@@ -205,53 +198,60 @@ export function ProductCamera({
           clearAudio()
           isModelRespondingRef.current = true
           setIsModelResponding(true)
-          console.log("[ProductCamera] Model started responding, muting mic input")
         }
 
         if (!base64Pcm || base64Pcm.length === 0) {
-          console.warn("[ProductCamera] Empty audio chunk received, skipping playback")
           return
         }
 
-        // Log first few chunks to verify audio is being sent to player
-        if (!sampleRateRef.current || sampleRateRef.current === sampleRate) {
-          const isFirstChunk = !sampleRateRef.current
-          if (isFirstChunk) {
-            console.log("[ProductCamera] Sending first audio chunk to player", {
-              sizeBytes: base64Pcm.length,
-              sampleRate: sampleRate ?? "default (24000)",
-            })
-          }
-        }
-
-        // If the user is currently speaking (client-side VAD), don't play model audio.
-        // This prevents overlap and reduces echo that would retrigger VAD.
-        if (isUserSpeakingRef.current) {
-          suppressedOutputChunkCountRef.current += 1
-          return
-        }
-
+        // Google's automatic VAD handles interruptions - play audio normally
+        // When user speaks, Google will send an 'interrupted' signal which triggers onAudioInterrupted
         playAudioChunk(base64Pcm, sampleRate)
       },
       onTurnComplete: () => {
         // Resume mic input when model's turn is complete
+        // #region agent log
+        fetch('http://127.0.0.1:7242/ingest/0039e2fc-a7e4-4ef9-b946-c52a89a638e6',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'ProductCamera.tsx:209',message:'onTurnComplete called',data:{isModelResponding:isModelRespondingRef.current,isOutputPlaying,outputChunkCount:outputAudioChunkCountRef.current},timestamp:Date.now(),sessionId:'debug-session',runId:'run1',hypothesisId:'C'})}).catch(()=>{});
+        // #endregion
         isModelRespondingRef.current = false
         setIsModelResponding(false)
         console.log("[ProductCamera] Turn complete, resuming mic input")
       },
       onAudioInterrupted: () => {
+        const interruptTime = Date.now()
+        
+        // #region agent log
+        // Track interruptions relative to tool calls and VAD state
+        const lastToolCallTime = geminiClientRef.current?.getLastToolCallTime() || null
+        const lastToolResponseTime = geminiClientRef.current?.getLastToolResponseTime() || null
+        const msSinceToolCall = lastToolCallTime ? interruptTime - lastToolCallTime : null
+        const msSinceToolResponse = lastToolResponseTime ? interruptTime - lastToolResponseTime : null
+        const lastToolCallName = geminiClientRef.current?.getLastToolCallName() || null
+        fetch('http://127.0.0.1:7242/ingest/0039e2fc-a7e4-4ef9-b946-c52a89a638e6',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'ProductCamera.tsx:228',message:'onAudioInterrupted called',data:{isModelResponding:isModelRespondingRef.current,isOutputPlaying,outputChunkCount:outputAudioChunkCountRef.current,msSinceToolCall,msSinceToolResponse,lastToolCallName},timestamp:Date.now(),sessionId:'debug-session',runId:'run1',hypothesisId:'B'})}).catch(()=>{});
+        // #endregion
+        
+        // Ignore spurious INTERRUPTED signals when model is not responding.
+        // After tool calls, Gemini sometimes sends INTERRUPTED even though the model
+        // isn't actively speaking. This would clear audio buffers unnecessarily.
+        if (!isModelRespondingRef.current) {
+          console.log("[ProductCamera] Ignoring INTERRUPTED signal (model not responding)")
+          // #region agent log
+          fetch('http://127.0.0.1:7242/ingest/0039e2fc-a7e4-4ef9-b946-c52a89a638e6',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'ProductCamera.tsx:236',message:'Ignoring INTERRUPTED - model not responding',data:{msSinceToolCall,msSinceToolResponse,lastToolCallName},timestamp:Date.now(),sessionId:'debug-session',runId:'run1',hypothesisId:'C'})}).catch(()=>{});
+          // #endregion
+          return
+        }
+        
         // Stop any queued playback immediately to prevent overlapping audio after interruption.
         interruptAudio()
         // Resume mic input when model is interrupted so user can speak again
         isModelRespondingRef.current = false
         setIsModelResponding(false)
-        console.log("[ProductCamera] Audio interrupted (model signal), resuming mic input")
       },
     }),
     [clearAudio, interruptAudio, isOutputPlaying, onListingCreated, onTextMessage, playAudioChunk, status],
   )
 
-  const { status, start, stop, sendFrameBase64, sendPcmBase64, sendActivityStart, sendActivityEnd } =
+  const { status, start, stop, sendFrameBase64, sendPcmBase64, clientRef: geminiClientRef } =
     useGeminiLive(
     geminiConfig,
     geminiOptions,
@@ -262,82 +262,49 @@ export function ProductCamera({
   // Track if stop was explicitly requested by user (to prevent auto-restart)
   const stopRequestedRef = useRef(false)
 
-  // Client-side VAD: we keep mic capture running but only forward audio during speech.
-  // Avoid muting at the capture layer so interruptions can be detected.
-  const isMicMuted = false
+  // Track how many mic chunks we suppress while the model is responding (echo/self-talk prevention)
+  const suppressedMicChunkCountRef = useRef(0)
+
+  // Avoid echo/self-talk: when the model is responding, don't stream mic audio back to Gemini.
+  // (Mic level is still computed for UI while muted.)
+  const isMicMuted = isModelResponding
   const shouldBufferAudio = status !== "connected"
 
-  // Handle incoming PCM audio data - forward to Gemini
-  // Note: Muting is now handled by usePcmAudioStream via isMuted option
-  const micChunkCountRef = useRef(0)
-  const isUserSpeakingRef = useRef(false)
-  const silenceChunkCountRef = useRef(0)
-  const speechStartConfirmCountRef = useRef(0)
-  // NOTE: micLevel (RMS) in this app is typically small (~0.001–0.02), so thresholds
-  // must be low or we will never detect speech.
-  const SPEECH_START_THRESHOLD = 0.004
-  const SPEECH_START_THRESHOLD_WHILE_PLAYING = 0.02
-  const SPEECH_END_THRESHOLD = 0.0025
-  const SPEECH_END_THRESHOLD_WHILE_PLAYING = 0.01
-  const START_CONFIRM_CHUNKS = 2
-  const START_CONFIRM_CHUNKS_WHILE_PLAYING = 3
-  const END_SILENCE_CHUNKS = 4 // ~4 * 64ms ≈ 256ms (faster turn-taking)
+  // #region agent log
+  const lastIsMicMutedLoggedRef = useRef<boolean | null>(null)
+  useEffect(() => {
+    if (lastIsMicMutedLoggedRef.current === isMicMuted) return
+    lastIsMicMutedLoggedRef.current = isMicMuted
+    fetch('http://127.0.0.1:7242/ingest/0039e2fc-a7e4-4ef9-b946-c52a89a638e6',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'ProductCamera.tsx:272',message:'Mic mute toggled (echo/self-talk prevention)',data:{isMicMuted,isModelResponding:isModelRespondingRef.current,isOutputPlaying,micLevel:micLevelRef.current,outputChunkCount:outputAudioChunkCountRef.current},timestamp:Date.now(),sessionId:'debug-session',runId:'run1',hypothesisId:'G'})}).catch(()=>{});
+  }, [isMicMuted, isOutputPlaying])
+  // #endregion
+
+  // Handle incoming PCM audio data - forward to Gemini continuously
+  // Google's automatic VAD will detect speech start/end automatically
   const handlePcmData = useCallback(
     (base64Pcm: string) => {
-      micChunkCountRef.current += 1
-      const levelNow = micLevelRef.current
-      const startTh = isOutputPlaying ? SPEECH_START_THRESHOLD_WHILE_PLAYING : SPEECH_START_THRESHOLD
-      const endTh = isOutputPlaying ? SPEECH_END_THRESHOLD_WHILE_PLAYING : SPEECH_END_THRESHOLD
-      const startConfirmChunks = isOutputPlaying ? START_CONFIRM_CHUNKS_WHILE_PLAYING : START_CONFIRM_CHUNKS
-
-      // Start speaking detection.
-      if (!isUserSpeakingRef.current) {
-        if (levelNow >= startTh) {
-          speechStartConfirmCountRef.current += 1
-        } else {
-          speechStartConfirmCountRef.current = 0
+      // Even if the native stream delivers a chunk before `isMuted` updates,
+      // suppress mic audio while the model is responding to reduce echo/self-talk.
+      if (isModelRespondingRef.current) {
+        suppressedMicChunkCountRef.current += 1
+        const suppressedCount = suppressedMicChunkCountRef.current
+        // #region agent log
+        if (suppressedCount <= 3 || suppressedCount % 25 === 0) {
+          fetch('http://127.0.0.1:7242/ingest/0039e2fc-a7e4-4ef9-b946-c52a89a638e6',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'ProductCamera.tsx:274',message:'Mic audio suppressed while model responding',data:{suppressedCount,micLevel:micLevelRef.current,isOutputPlaying,outputChunkCount:outputAudioChunkCountRef.current},timestamp:Date.now(),sessionId:'debug-session',runId:'run1',hypothesisId:'G'})}).catch(()=>{});
         }
-
-        if (speechStartConfirmCountRef.current >= startConfirmChunks) {
-          isUserSpeakingRef.current = true
-          silenceChunkCountRef.current = 0
-          speechStartConfirmCountRef.current = 0
-
-          // If model audio is playing, stop it immediately to reduce echo and prevent overlap.
-          if (isOutputPlaying) {
-            interruptAudio()
-          }
-          sendActivityStart()
-        }
-      }
-
-      // If not in a speech segment, don't send audio (reduces noise + improves turn-taking).
-      if (!isUserSpeakingRef.current) {
+        // #endregion
         return
       }
 
-      // End-of-speech detection.
-      if (levelNow <= endTh) {
-        silenceChunkCountRef.current += 1
-        if (silenceChunkCountRef.current >= END_SILENCE_CHUNKS) {
-          isUserSpeakingRef.current = false
-          silenceChunkCountRef.current = 0
-          sendActivityEnd()
-        }
-        return
-      }
-
-      // Speaking: reset silence counter and send audio.
-      silenceChunkCountRef.current = 0
+      // Forward mic audio to Gemini (Google's VAD handles detection)
       sendPcmBase64(base64Pcm, 16000)
     },
-    [interruptAudio, isOutputPlaying, micLevel, sendActivityEnd, sendActivityStart, sendPcmBase64, shouldBufferAudio, status],
+    [isOutputPlaying, sendPcmBase64],
   )
 
   // Handle buffered audio chunks when connection becomes ready
   const handleBufferedData = useCallback(
     (chunks: string[]) => {
-      console.log("[ProductCamera] Sending buffered audio chunks", { count: chunks.length })
       for (const chunk of chunks) {
         sendPcmBase64(chunk, 16000)
       }
@@ -354,7 +321,9 @@ export function ProductCamera({
     level: micLevelLive,
   } = usePcmAudioStream({
     onData: handlePcmData,
-    onError: (error) => console.warn("PCM audio error:", error),
+    onError: () => {
+      // PCM audio error
+    },
     onLevel: (lvl) => {
       micLevelRef.current = lvl
       setMicLevel(lvl)
@@ -505,8 +474,9 @@ export function ProductCamera({
     if (isCapturing) {
       return
     }
-    // Reduce load while the user/model is speaking to improve responsiveness.
-    if (isUserSpeakingRef.current || isModelRespondingRef.current) {
+    // Reduce load while the model is speaking to improve responsiveness.
+    // Frames continue to be sent while the user is speaking.
+    if (isModelRespondingRef.current) {
       return
     }
 

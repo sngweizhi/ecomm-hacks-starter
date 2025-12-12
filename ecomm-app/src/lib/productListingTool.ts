@@ -148,6 +148,11 @@ export class CreateProductListingTool extends FunctionCallDefinition {
             description:
               "A detailed prompt for generating a professional studio product photo. Format: 'Professional product photo of [detailed item description including color, brand, key features] on clean white background, studio lighting, high resolution, e-commerce style, isolated subject'",
           },
+          productRef: {
+            type: "string",
+            description:
+              "The productRef identifier that matches the productRef used when storing images for this product. This ensures the correct images are associated with this listing. If you've been storing images with a productRef, use the same one here.",
+          },
         },
       },
       ["title", "description", "price", "category", "imagePrompt"],
@@ -191,13 +196,18 @@ export class StoreProductImageTool extends FunctionCallDefinition {
   constructor() {
     super(
       "store_product_image",
-      "Captures the current video frame with a description of what's visible (angle/condition/defects). Call this multiple times as the user moves around the product.",
+      "Captures the current video frame to document the product. Call this IMMEDIATELY when you first see a new product, and continue calling it (up to 9 times total) to capture multiple angles, defects, damage, or when the user points out specific issues. This function is non-blocking - you can continue speaking while images are stored.",
       {
         properties: {
           description: {
             type: "string",
             description:
-              "Description of what the frame shows: angle (front/back/side/top/bottom), visible defects or wear, materials, or notable features.",
+              "Description of what the frame shows: the angle/viewpoint (front/back/side/top/bottom), any visible defects or damage, wear patterns, materials, notable features, or what the user is specifically pointing out. Be specific about what makes this angle/view unique.",
+          },
+          productRef: {
+            type: "string",
+            description:
+              "A unique identifier for the product being captured (e.g., 'laptop-1', 'mouse-2'). Use the same productRef for all images of the same product. When you detect a new product visually, generate a new productRef. This helps organize images by product.",
           },
         },
       },

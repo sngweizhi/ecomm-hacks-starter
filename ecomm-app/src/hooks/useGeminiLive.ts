@@ -110,12 +110,18 @@ export function useGeminiLive(config: GeminiLiveConfig, options: UseGeminiLiveOp
   const lastAudioSentAt = useRef<number>(0)
   const frameSentCount = useRef<number>(0)
   const audioSentCount = useRef<number>(0)
-  const audioLogCount = useRef<number>(0)
   const lastFrameBase64Ref = useRef<string | null>(null)
   const productListingToolRef = useRef<CreateProductListingTool | null>(null)
-  const storedImagesRef = useRef<StoredProductImage[]>([])
+  // Map of productRef -> array of stored images for that product
+  const storedImagesRef = useRef<Map<string, StoredProductImage[]>>(new Map())
+  // Track current productRef being worked on (for fallback when productRef missing)
+  const currentProductRefRef = useRef<string | null>(null)
   // Track in-flight listing creations to handle concurrency
   const inFlightListingsRef = useRef<Set<string>>(new Set())
+  // Track last TURN_COMPLETE time to prevent continuous audio from triggering new responses
+  const lastTurnCompleteTimeRef = useRef<number | null>(null)
+  // Cooldown period after TURN_COMPLETE during which we don't send audio to prevent VAD false positives
+  const TURN_COMPLETE_AUDIO_COOLDOWN_MS = 2000
 
   // Convex action for generating studio photo and creating listing
   const generateStudioPhotoAndCreateListing = useAction(
@@ -126,7 +132,15 @@ export function useGeminiLive(config: GeminiLiveConfig, options: UseGeminiLiveOp
   // Handle tool calls from Gemini - non-blocking background processing
   const handleToolCall = useCallback(
     (toolCallData: ToolCallData, client: GeminiLiveClient) => {
+      const toolCallReceivedTime = Date.now()
       console.log("[useGeminiLive] Tool call received:", toolCallData)
+      
+      // #region agent log
+      // Track tool call reception to debug interruptions
+      const functionNames = toolCallData.functionCalls.map(fc => fc.name)
+      const functionCallIds = toolCallData.functionCalls.map(fc => ({ id: fc.id, name: fc.name }))
+      fetch('http://127.0.0.1:7242/ingest/0039e2fc-a7e4-4ef9-b946-c52a89a638e6',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'useGeminiLive.ts:131',message:'Tool call handler invoked',data:{functionCallIds,functionNames,count:toolCallData.functionCalls.length},timestamp:Date.now(),sessionId:'debug-session',runId:'run1',hypothesisId:'E'})}).catch(()=>{});
+      // #endregion
 
       for (const functionCall of toolCallData.functionCalls) {
         if (functionCall.name === "store_product_image") {
@@ -135,6 +149,21 @@ export function useGeminiLive(config: GeminiLiveConfig, options: UseGeminiLiveOp
             typeof functionCall.args.description === "string"
               ? functionCall.args.description.trim()
               : ""
+          
+          // Extract productRef or generate/use fallback
+          let productRef: string
+          if (typeof functionCall.args.productRef === "string" && functionCall.args.productRef.trim()) {
+            productRef = functionCall.args.productRef.trim()
+            currentProductRefRef.current = productRef
+          } else {
+            // Fallback: use current productRef or generate a new one
+            if (!currentProductRefRef.current) {
+              productRef = `product-${Date.now()}`
+              currentProductRefRef.current = productRef
+            } else {
+              productRef = currentProductRefRef.current
+            }
+          }
 
           if (!imageBase64) {
             console.error("[useGeminiLive] No frame captured to store")
@@ -155,14 +184,25 @@ export function useGeminiLive(config: GeminiLiveConfig, options: UseGeminiLiveOp
             timestamp: Date.now(),
           }
 
-          // Keep the most recent 9 images
-          storedImagesRef.current = [...storedImagesRef.current.slice(-8), record]
+          // Get or create image array for this productRef
+          const productImages = storedImagesRef.current.get(productRef) || []
+          // Keep the most recent 9 images per product
+          const updatedImages = [...productImages.slice(-8), record]
+          storedImagesRef.current.set(productRef, updatedImages)
+
+          console.log("[useGeminiLive] Image stored successfully", {
+            productRef,
+            description,
+            totalImagesStored: updatedImages.length,
+            timestamp: Date.now(),
+          })
 
           client.sendToolResponse(
             functionCall.id,
             {
               success: true,
-              imagesStored: storedImagesRef.current.length,
+              imagesStored: updatedImages.length,
+              productRef,
             },
             functionCall.name,
           )
@@ -179,15 +219,34 @@ export function useGeminiLive(config: GeminiLiveConfig, options: UseGeminiLiveOp
           // Validate and extract params
           const params = validateProductParams(functionCall.args)
 
+          // Extract productRef or use current/fallback
+          let productRef: string | null = null
+          if (typeof functionCall.args.productRef === "string" && functionCall.args.productRef.trim()) {
+            productRef = functionCall.args.productRef.trim()
+          } else if (currentProductRefRef.current) {
+            productRef = currentProductRefRef.current
+          }
+
           // Show immediate success toast - Gemini understood the intent!
           showSuccessToast(
             `${params.title} listing!`,
             "Creating your professional listing...",
           )
 
-          // Prefer the latest stored frame; fall back to last streamed frame
-          const imageBase64 =
-            storedImagesRef.current.at(-1)?.imageBase64 ?? lastFrameBase64Ref.current
+          // Get images for this productRef, or fall back to last streamed frame
+          let imageBase64: string | null = null
+          let storedImages: StoredProductImage[] = []
+          
+          if (productRef) {
+            storedImages = storedImagesRef.current.get(productRef) || []
+            imageBase64 = storedImages.at(-1)?.imageBase64 ?? null
+          }
+          
+          // Fallback to last streamed frame if no product-specific images
+          if (!imageBase64) {
+            imageBase64 = lastFrameBase64Ref.current
+          }
+          
           if (!imageBase64) {
             console.error("[useGeminiLive] No frame captured for listing creation")
             client.sendToolResponse(
@@ -202,8 +261,10 @@ export function useGeminiLive(config: GeminiLiveConfig, options: UseGeminiLiveOp
             continue
           }
 
-          // Track this listing creation to prevent duplicate processing
-          const listingKey = `${functionCall.id}-${params.title}`
+          // Track this listing creation to prevent duplicate processing (include productRef in key)
+          const listingKey = productRef 
+            ? `${productRef}-${functionCall.id}-${params.title}`
+            : `${functionCall.id}-${params.title}`
           if (inFlightListingsRef.current.has(listingKey)) {
             console.log("[useGeminiLive] Listing already in progress, skipping:", listingKey)
             continue
@@ -225,11 +286,12 @@ export function useGeminiLive(config: GeminiLiveConfig, options: UseGeminiLiveOp
           void (async () => {
             try {
               let panelUrl: string | undefined
-              const storedImages = [...storedImagesRef.current]
+              // Use the stored images for this specific productRef
+              const productStoredImages = [...storedImages]
 
-              if (storedImages.length > 0) {
+              if (productStoredImages.length > 0) {
                 const panelResult = await generateProductPanel({
-                  images: storedImages,
+                  images: productStoredImages,
                   title: params.title,
                   description: params.description,
                   brand: params.brand,
@@ -267,6 +329,7 @@ export function useGeminiLive(config: GeminiLiveConfig, options: UseGeminiLiveOp
               if (result.success && result.listingId) {
                 console.log("[useGeminiLive] Listing created", {
                   listingId: result.listingId,
+                  productRef,
                   elapsedMs: Date.now() - toolStartedAt,
                 })
 
@@ -294,12 +357,19 @@ export function useGeminiLive(config: GeminiLiveConfig, options: UseGeminiLiveOp
               options.onListingError?.(errorMessage)
             } finally {
               console.log("[useGeminiLive] Listing processing finished", {
+                productRef,
                 elapsedMs: Date.now() - toolStartedAt,
               })
               // Remove from in-flight tracking
               inFlightListingsRef.current.delete(listingKey)
-              // Clear stored images for the next product session
-              storedImagesRef.current = []
+              // Clear stored images ONLY for this productRef (not all products)
+              if (productRef) {
+                storedImagesRef.current.delete(productRef)
+                // Reset current productRef if it was the one we just processed
+                if (currentProductRefRef.current === productRef) {
+                  currentProductRefRef.current = null
+                }
+              }
             }
           })()
         } else {
@@ -329,31 +399,20 @@ export function useGeminiLive(config: GeminiLiveConfig, options: UseGeminiLiveOp
         if (base64Audio && base64Audio.length > 0) {
           // Extract sample rate from message (already parsed in geminiLive.ts)
           const sampleRate = message.sampleRate
-          // Throttle audio logs to reduce JS thread load
-          audioLogCount.current += 1
-          if (audioLogCount.current <= 2 || audioLogCount.current % 20 === 0) {
-            console.log("[useGeminiLive] Received audio chunk", {
-              mimeType: message.mimeType,
-              sampleRate: sampleRate ?? "default",
-              sizeBytes: base64Audio.length,
-              count: audioLogCount.current,
-            })
-          }
           options.onAudioData?.(base64Audio, message.mimeType, sampleRate)
-        } else {
-          console.warn("[useGeminiLive] Unable to decode audio chunk from Gemini", {
-            type: typeof message.data,
-            mimeType: message.mimeType,
-          })
         }
       } else if (message.type === GeminiLiveResponseType.INTERRUPTED) {
-        console.log("[useGeminiLive] Audio interrupted")
         options.onAudioInterrupted?.()
       } else if (message.type === GeminiLiveResponseType.TURN_COMPLETE) {
         // Turn has finished (model completed its response). We don't reset audio here
         // to avoid cutting off the tail of the response; the player will naturally
         // finish as buffered audio is played out.
         console.log("[useGeminiLive] Turn complete")
+        // Track TURN_COMPLETE time to implement audio cooldown
+        lastTurnCompleteTimeRef.current = Date.now()
+        // #region agent log
+        fetch('http://127.0.0.1:7242/ingest/0039e2fc-a7e4-4ef9-b946-c52a89a638e6',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'useGeminiLive.ts:403',message:'TURN_COMPLETE received - starting audio cooldown',data:{turnCompleteTime:lastTurnCompleteTimeRef.current,cooldownMs:TURN_COMPLETE_AUDIO_COOLDOWN_MS},timestamp:Date.now(),sessionId:'debug-session',runId:'run1',hypothesisId:'F'})}).catch(()=>{});
+        // #endregion
         options.onTurnComplete?.()
       }
     },
@@ -397,6 +456,8 @@ export function useGeminiLive(config: GeminiLiveConfig, options: UseGeminiLiveOp
       console.log("[useGeminiLive] Cleanup: closing client")
       client.close()
       clientRef.current = null
+      // Reset cooldown timer on cleanup
+      lastTurnCompleteTimeRef.current = null
     }
     // Empty deps - only run once on mount
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -424,6 +485,8 @@ export function useGeminiLive(config: GeminiLiveConfig, options: UseGeminiLiveOp
     console.log("[useGeminiLive] stop() called")
     clientRef.current?.close()
     setStatus("idle")
+    // Reset cooldown timer on stop
+    lastTurnCompleteTimeRef.current = null
   }, [])
 
   const sendFrameBase64 = useCallback(
@@ -465,17 +528,34 @@ export function useGeminiLive(config: GeminiLiveConfig, options: UseGeminiLiveOp
         return
       }
 
+      // #region agent log
+      // Check if we're within cooldown period after TURN_COMPLETE
+      const msSinceTurnComplete = lastTurnCompleteTimeRef.current 
+        ? now - lastTurnCompleteTimeRef.current 
+        : null
+      const isInCooldown = msSinceTurnComplete !== null && msSinceTurnComplete < TURN_COMPLETE_AUDIO_COOLDOWN_MS
+      
+      if (isInCooldown) {
+        // Block audio sending during cooldown to prevent Google's VAD from interpreting
+        // continuous audio stream as new speech after TURN_COMPLETE
+        fetch('http://127.0.0.1:7242/ingest/0039e2fc-a7e4-4ef9-b946-c52a89a638e6',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'useGeminiLive.ts:510',message:'Audio blocked during TURN_COMPLETE cooldown',data:{msSinceTurnComplete,cooldownMs:TURN_COMPLETE_AUDIO_COOLDOWN_MS,audioChunkSize:pcmBase64.length},timestamp:Date.now(),sessionId:'debug-session',runId:'run1',hypothesisId:'F'})}).catch(()=>{});
+        return // Skip sending audio during cooldown
+      }
+      // #endregion
+
       lastAudioSentAt.current = now
       audioSentCount.current += 1
-      // Do not log every chunk to avoid spam, maybe every 10th
-      if (audioSentCount.current % 10 === 0) {
-        console.log("[useGeminiLive] Sending audio chunk", {
-          sizeBytes: pcmBase64.length,
-          sampleRate,
-          audioNumber: audioSentCount.current,
-          ts: now,
-        })
+      
+      // #region agent log
+      // Track if user audio is being sent shortly after tool responses (potential echo/feedback)
+      const lastToolResponseTime = clientRef.current?.getLastToolResponseTime()
+      const msSinceToolResponse = lastToolResponseTime ? now - lastToolResponseTime : null
+      if (msSinceToolResponse !== null && msSinceToolResponse < 10000) {
+        const lastToolResponseName = clientRef.current?.getLastToolResponseName()
+        fetch('http://127.0.0.1:7242/ingest/0039e2fc-a7e4-4ef9-b946-c52a89a638e6',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'useGeminiLive.ts:510',message:'User audio sent after tool response',data:{msSinceToolResponse,lastToolResponseName,audioChunkSize:pcmBase64.length,audioSentCount:audioSentCount.current},timestamp:Date.now(),sessionId:'debug-session',runId:'run1',hypothesisId:'D'})}).catch(()=>{});
       }
+      // #endregion
+      
       clientRef.current.sendAudio(pcmBase64, sampleRate)
     },
     [],
@@ -494,7 +574,8 @@ export function useGeminiLive(config: GeminiLiveConfig, options: UseGeminiLiveOp
   }, [])
 
   const clearStoredImages = useCallback(() => {
-    storedImagesRef.current = []
+    storedImagesRef.current.clear()
+    currentProductRefRef.current = null
   }, [])
 
   // Check if Gemini Live setup is complete and ready for audio/frames
@@ -514,5 +595,6 @@ export function useGeminiLive(config: GeminiLiveConfig, options: UseGeminiLiveOp
     sendActivityEnd,
     clearStoredImages,
     isSetupComplete,
+    clientRef, // Expose for debugging access
   }
 }

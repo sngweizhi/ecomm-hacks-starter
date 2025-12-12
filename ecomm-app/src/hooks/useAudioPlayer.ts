@@ -117,7 +117,7 @@ async function configureAudioSession() {
       interruptionModeAndroid: 1, // DoNotMix
     })
   } catch (error) {
-    console.warn("[useAudioPlayer] Error configuring audio session:", error)
+    // Error configuring audio session
   }
 }
 
@@ -169,7 +169,6 @@ export function useAudioPlayer(options: UseAudioPlayerOptions = {}) {
         usingNativePlayerRef.current = true
         nativeBacklogUpdatedAtMsRef.current = Date.now()
       } catch (e) {
-        console.warn("[useAudioPlayer] Native player init failed, falling back", e)
         usingNativePlayerRef.current = false
       }
       return
@@ -195,8 +194,18 @@ export function useAudioPlayer(options: UseAudioPlayerOptions = {}) {
         }
 
         // If we ran out of queued audio, reflect not-playing.
-        if (queuedSecondsRef.current <= 0.001) {
+        // IMPORTANT: Check both queuedSeconds AND remaining buffers to avoid stopping prematurely
+        // when there are still buffers queued but the time estimate is slightly off
+        const hasRemainingBuffers = bufferDurationsRef.current.size > 0
+        if (queuedSecondsRef.current <= 0.001 && !hasRemainingBuffers) {
           setIsPlayingState(false)
+        } else if (hasRemainingBuffers && queuedSecondsRef.current <= 0.001) {
+          // Recalculate queuedSeconds from remaining buffers to fix the estimate
+          let totalRemaining = 0
+          for (const dur of bufferDurationsRef.current.values()) {
+            totalRemaining += dur
+          }
+          queuedSecondsRef.current = totalRemaining
         }
       }
 
@@ -240,7 +249,6 @@ export function useAudioPlayer(options: UseAudioPlayerOptions = {}) {
       setIsPlayingState(true)
     } catch (e) {
       // If start fails (e.g. already started), keep going.
-      console.warn("[useAudioPlayer] Failed to start queue node", e)
       startedRef.current = true
       setIsPlayingState(true)
     }
@@ -329,6 +337,7 @@ export function useAudioPlayer(options: UseAudioPlayerOptions = {}) {
         const nowMs = Date.now()
         const lastMs = nativeBacklogUpdatedAtMsRef.current ?? nowMs
         const elapsedSec = Math.max(0, (nowMs - lastMs) / 1000)
+        const beforeDecay = queuedSecondsRef.current
         // Assume native playback consumes at ~1x real-time when running.
         queuedSecondsRef.current = Math.max(0, queuedSecondsRef.current - elapsedSec)
         nativeBacklogUpdatedAtMsRef.current = nowMs
@@ -337,13 +346,10 @@ export function useAudioPlayer(options: UseAudioPlayerOptions = {}) {
         const approxBytes = (base64Chunk.length * 3) / 4
         const frames = Math.floor(approxBytes / 2)
         const chunkDurationSec = frames > 0 ? frames / sampleRate : 0
+        const beforeAdd = queuedSecondsRef.current
         if (chunkDurationSec > 0) queuedSecondsRef.current += chunkDurationSec
 
         if (queuedSecondsRef.current > maxBufferSeconds) {
-          console.warn("[useAudioPlayer] Dropping buffered audio (native backlog too large)", {
-            queuedSeconds: queuedSecondsRef.current,
-            maxBufferSeconds,
-          })
           // Hard safety valve: clear queued audio without restarting the engine.
           // We avoid “partial” dropping because that sounds like fragmentation.
           try {
@@ -361,7 +367,6 @@ export function useAudioPlayer(options: UseAudioPlayerOptions = {}) {
           nativePlayer.enqueueBase64(base64Chunk)
           setIsPlayingState(true)
         } catch (e) {
-          console.warn("[useAudioPlayer] Native enqueue failed, falling back", e)
           usingNativePlayerRef.current = false
         }
 
@@ -391,10 +396,6 @@ export function useAudioPlayer(options: UseAudioPlayerOptions = {}) {
 
       // Backlog control: if we’re too far behind, drop buffered audio.
       if (queuedSecondsRef.current > maxBufferSeconds) {
-        console.warn("[useAudioPlayer] Dropping buffered audio (backlog too large)", {
-          queuedSeconds: queuedSecondsRef.current,
-          maxBufferSeconds,
-        })
         interrupt()
         ensureEngine()
       }
@@ -405,17 +406,10 @@ export function useAudioPlayer(options: UseAudioPlayerOptions = {}) {
       const bufferId = queue.enqueueBuffer(buffer)
       const durationSec = frames / sampleRate
       bufferDurationsRef.current.set(bufferId, durationSec)
+      const beforeEnqueue = queuedSecondsRef.current
       queuedSecondsRef.current += durationSec
 
       enqueueCountRef.current += 1
-      if (enqueueCountRef.current <= 2 || enqueueCountRef.current % 50 === 0) {
-        console.log("[useAudioPlayer] Enqueued PCM chunk", {
-          frames,
-          durationMs: Math.round(durationSec * 1000),
-          queuedMs: Math.round(queuedSecondsRef.current * 1000),
-          count: enqueueCountRef.current,
-        })
-      }
 
       void startIfReady()
     },
